@@ -1,0 +1,114 @@
+{
+  "name": "印尼投放DWD表产出校验告警",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ID_MARKETING_DWD_CNT",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "id-marketing-dwd-cnt-webhook",
+      "name": "Webhook",
+      "webhookId": "replace-with-generated-indonesia-marketing-dwd-webhook-id"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        144
+      ],
+      "id": "id-marketing-dwd-cnt-manual",
+      "name": "When clicking 'Execute workflow'"
+    },
+    {
+      "parameters": {
+        "authentication": "privateKey",
+        "command": "ssh -p 36000 root@192.168.21.236 'cd /tmp && rm -rf starrocks-pl-monitor-tv-alert-main starrocks-pl-monitor-tv-alert-main.tar.gz && wget --tries=3 --retry-connrefused --waitretry=2 -O starrocks-pl-monitor-tv-alert-main.tar.gz https://github.com/chenjiuxuan1/starrocks-pl-monitor-tv-alert/archive/refs/heads/main.tar.gz && tar -xzf starrocks-pl-monitor-tv-alert-main.tar.gz && rm -rf /root/starrocks-pl-monitor-tv-alert && mkdir -p /root/starrocks-pl-monitor-tv-alert && cp -rf /tmp/starrocks-pl-monitor-tv-alert-main/. /root/starrocks-pl-monitor-tv-alert/'"
+      },
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        288,
+        72
+      ],
+      "id": "id-marketing-dwd-cnt-code-pull",
+      "name": "投放DWD告警代码拉取",
+      "credentials": {
+        "sshPrivateKey": {
+          "id": "SyHW5nXUCnuULr2c",
+          "name": "印尼跳板机"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "privateKey",
+        "command": "ssh -p 36000 root@192.168.21.236 \"cd /root/starrocks-pl-monitor-tv-alert && SR_HOST='replace-with-indonesia-sr-host' SR_PORT='9030' SR_DB='testdb' SR_USERNAME='e_load' SR_BACKUP_USERNAME='backup_user' python3 alert/id_marketing_dwd_table_cnt_alert.py --sr-password 'replace-with-sr-password' --sr-backup-password 'replace-with-sr-backup-password' --bot-id '4d0bcc9b-71bf-41c5-ba9f-89b7278f9214' --mentions 'adamyu@kn.group,gretchenhe@kn.group'\""
+      },
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        544,
+        72
+      ],
+      "id": "id-marketing-dwd-cnt-alert-run",
+      "name": "投放DWD告警触发",
+      "credentials": {
+        "sshPrivateKey": {
+          "id": "SyHW5nXUCnuULr2c",
+          "name": "印尼跳板机"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "投放DWD告警代码拉取",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking 'Execute workflow'": {
+      "main": [
+        [
+          {
+            "node": "投放DWD告警代码拉取",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "投放DWD告警代码拉取": {
+      "main": [
+        [
+          {
+            "node": "投放DWD告警触发",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "tags": []
+}
