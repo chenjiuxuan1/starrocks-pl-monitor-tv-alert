@@ -272,7 +272,11 @@ def format_alert_message(rows, target_date=None, problems=None):
         table_name = problem["table_name"]
         row = rows_by_table.get(table_name, {})
         cnt = problem.get("cnt", row.get("cnt"))
-        reason = "校验结果缺失" if problem.get("reason") == "missing_check_result" else "T-1分区数据量为0"
+        reason = (
+            f"{target_date.strftime('%Y-%m-%d')} 校验结果缺失，数据有问题"
+            if problem.get("reason") == "missing_check_result"
+            else f"{target_date.strftime('%Y-%m-%d')} 数据量为0，数据有问题"
+        )
         lines.append(f"{index}. {table_name} | cnt={_format_count(cnt)} | {reason}")
     return "\n".join(lines)
 

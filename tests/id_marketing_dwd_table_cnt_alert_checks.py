@@ -168,8 +168,8 @@ class IdMarketingDwdTableCntAlertTests(unittest.TestCase):
         self.assertIn("印尼投放DWD表T-1产出校验", message)
         self.assertIn("统计日期: 2026-07-01", message)
         self.assertIn("预期表数: 13，实际校验结果: 13，异常表数: 2", message)
-        self.assertIn("1. dwd_ad_gg_conversion_action | cnt=0 | T-1分区数据量为0", message)
-        self.assertIn("2. dwd_ad_platform_report_snap | cnt=0 | T-1分区数据量为0", message)
+        self.assertIn("1. dwd_ad_gg_conversion_action | cnt=0 | 2026-07-01 数据量为0，数据有问题", message)
+        self.assertIn("2. dwd_ad_platform_report_snap | cnt=0 | 2026-07-01 数据量为0，数据有问题", message)
 
     def test_format_alert_message_outputs_normal_summary_without_problems(self):
         module = load_module()
