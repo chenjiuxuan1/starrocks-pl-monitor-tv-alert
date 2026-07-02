@@ -13,6 +13,26 @@
 
 ## 运行
 
+统一告警入口：
+
+```bash
+python3 alert/run_alert.py \
+  --alert id_marketing_dwd_cnt \
+  --sr-password '主账号密码' \
+  --sr-backup-password '备份账号密码' \
+  --bot-id '4d0bcc9b-71bf-41c5-ba9f-89b7278f9214' \
+  --mentions 'owner@kn.group,backup@kn.group'
+```
+
+当前支持的 `--alert`：
+
+- `pl_monitor`：中国 PL 监控告警
+- `fin_ods_quality`：中国数仓与财务库数据一致性校验告警
+- `mx_capital_ltv`：墨西哥资方 LTV 告警，可附加 `--capital new_share/chuanjin/all`
+- `id_marketing_dwd_cnt`：印尼投放 DWD 表 T-1 产出校验告警，可附加 `--target-date YYYY-MM-DD` 或 `--skip-refresh`
+
+原脚本入口仍然兼容：
+
 原有 PL 监控告警：
 
 ```bash
@@ -96,6 +116,12 @@ python3 alert/id_marketing_dwd_table_cnt_alert.py \
 ```
 
 ## 配置
+
+公共代码：
+
+- `alert/common/sr_client.py`：统一 StarRocks 主备账号连接、查询、执行 SQL。
+- `alert/common/tv_sender.py`：统一 TV 机器人 payload 和 HTTP 发送。
+- `alert/run_alert.py`：统一 n8n/命令行入口，按 `--alert` 分发到具体告警。
 
 默认配置：
 

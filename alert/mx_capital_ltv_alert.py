@@ -23,20 +23,18 @@
 """
 
 import argparse
-import json
 import os
 import sys
-import urllib.error
-import urllib.request
-from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import pymysql
-from pymysql.cursors import DictCursor
+from alert.common import sr_client, tv_sender
+
+pymysql = sr_client.pymysql
+urllib = tv_sender.urllib
 
 try:
     from config import auto_load_env  # noqa: F401
@@ -77,61 +75,28 @@ NEW_SHARE_BALANCE_THRESHOLD = Decimal("4420000")
 CHUANJIN_BALANCE_THRESHOLD = Decimal("424000")
 
 
-@dataclass
-class StarRocksAccount:
-    username: str
-    password: str
-
-
-@dataclass
-class StarRocksConfig:
-    host: str
-    port: int
-    db: str
-    primary: StarRocksAccount
-    backup: StarRocksAccount
+StarRocksAccount = sr_client.StarRocksAccount
+StarRocksConfig = sr_client.StarRocksConfig
 
 
 def get_starrocks_config(sr_password=None, sr_backup_password=None):
-    return StarRocksConfig(
-        host=os.environ.get("SR_HOST", "127.0.0.1"),
-        port=int(os.environ.get("SR_PORT", "9030")),
-        db=os.environ.get("SR_DB", "dm_dd_new"),
-        primary=StarRocksAccount(
-            username=os.environ.get("SR_USERNAME", "e_load"),
-            password=sr_password or os.environ.get("SR_PASSWORD", ""),
-        ),
-        backup=StarRocksAccount(
-            username=os.environ.get("SR_BACKUP_USERNAME", "backup_user"),
-            password=sr_backup_password or os.environ.get("SR_BACKUP_PASSWORD", ""),
-        ),
+    return sr_client.build_config(
+        sr_password=sr_password,
+        sr_backup_password=sr_backup_password,
+        default_host="127.0.0.1",
+        default_port=9030,
+        default_db="dm_dd_new",
+        default_username="e_load",
+        default_backup_username="backup_user",
     )
 
 
 def _connect_with_account(config, account):
-    return pymysql.connect(
-        host=config.host,
-        port=config.port,
-        user=account.username,
-        password=account.password,
-        database=config.db,
-        charset="utf8mb4",
-        cursorclass=DictCursor,
-    )
+    return sr_client._connect_with_account(config, account)
 
 
 def get_connection(config=None):
-    config = config or get_starrocks_config()
-    errors = []
-    for label, account in (("primary", config.primary), ("backup", config.backup)):
-        if not account.password:
-            errors.append(f"{label} account {account.username} missing password")
-            continue
-        try:
-            return _connect_with_account(config, account)
-        except Exception as exc:
-            errors.append(f"{label} account {account.username} failed: {exc}")
-    raise RuntimeError("StarRocks connection failed: " + "; ".join(errors))
+    return sr_client.get_connection(config or get_starrocks_config())
 
 
 def default_target_date():
@@ -309,51 +274,12 @@ def format_alert_message(rows, target_date=None, capital=None, capitals=None):
 def send_to_tv(message, mentions=None, bot_id=None, api_url=None):
     if mentions is None:
         mentions = DEFAULT_MENTIONS
-    if not message.endswith("\n"):
-        message = f"{message}\n"
-
-    payload = {
-        "botId": bot_id or TV_BOT_ID,
-        "message": message,
-        "mentions": mentions,
-    }
-    json_data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    request = urllib.request.Request(
-        api_url or TV_API_URL,
-        data=json_data,
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        },
-        method="POST",
+    return tv_sender.send_to_tv(
+        message,
+        mentions=mentions,
+        bot_id=bot_id or TV_BOT_ID,
+        api_url=api_url or TV_API_URL,
     )
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            status_code = response.getcode()
-            response_body = response.read().decode("utf-8")
-            return {
-                "success": 200 <= status_code < 300,
-                "status_code": status_code,
-                "response": response_body,
-            }
-    except urllib.error.HTTPError as exc:
-        response_body = ""
-        if exc.fp is not None:
-            try:
-                response_body = exc.fp.read().decode("utf-8")
-            except Exception:
-                response_body = ""
-        return {
-            "success": False,
-            "status_code": exc.code,
-            "response": response_body or str(exc.reason),
-        }
-    except Exception as exc:
-        return {
-            "success": False,
-            "status_code": None,
-            "response": str(exc),
-        }
 
 
 def run(dry_run=False, mentions=None, sr_password=None, sr_backup_password=None, bot_id=None, target_date=None, capital=None):
