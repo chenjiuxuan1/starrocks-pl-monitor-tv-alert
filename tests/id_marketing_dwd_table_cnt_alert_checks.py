@@ -107,6 +107,32 @@ class IdMarketingDwdTableCntAlertTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             module.build_check_config(table_names="dwd_ad_tt_report;drop table x")
 
+    def test_build_check_config_selects_country_profile(self):
+        module = load_module()
+
+        check_config = module.build_check_config(profile="ph")
+
+        self.assertEqual(check_config.profile, "ph")
+        self.assertEqual(check_config.country_name, "菲律宾")
+        self.assertEqual(check_config.platform_type, "投放")
+        self.assertEqual(check_config.check_table, "testdb.test_dwd_ad_table_cnt_check")
+        self.assertEqual(check_config.expected_tables, module.EXPECTED_TABLES)
+
+    def test_build_check_config_allows_platform_type_override(self):
+        module = load_module()
+
+        check_config = module.build_check_config(profile="th", platform_type="广告投放")
+
+        self.assertEqual(check_config.country_name, "泰国")
+        self.assertEqual(check_config.platform_type, "广告投放")
+        self.assertEqual(check_config.alert_title, "🚨 泰国广告投放DWD表T-1产出校验")
+
+    def test_build_check_config_rejects_unknown_profile(self):
+        module = load_module()
+
+        with self.assertRaises(ValueError):
+            module.build_check_config(profile="unknown-country")
+
     def test_refresh_check_table_creates_table_and_inserts_counts(self):
         module = load_module()
         fake_conn = FakeConnection()

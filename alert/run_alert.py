@@ -37,7 +37,9 @@ def parse_args(argv=None):
     parser.add_argument("--mentions", default="", help="逗号分隔的提醒邮箱列表")
     parser.add_argument("--capital", default=None, help="墨西哥资方 LTV 参数：all/new_share/chuanjin")
     parser.add_argument("--skip-refresh", action="store_true", help="投放 DWD 校验跳过刷新")
+    parser.add_argument("--profile", default=None, help="投放 DWD 国家配置档，例如 id/ine/ph/th/mx/pk")
     parser.add_argument("--country-name", default=None, help="投放 DWD 校验国家名称，例如 印尼、菲律宾、泰国")
+    parser.add_argument("--platform-type", default=None, help="投放 DWD 平台类型，例如 投放")
     parser.add_argument("--check-table", default=None, help="投放 DWD 校验结果表")
     parser.add_argument("--table-names", default=None, help="逗号分隔的投放 DWD 表名列表")
     parser.add_argument("--limit", type=int, default=None, help="兼容旧告警脚本参数")
@@ -64,7 +66,9 @@ def main(argv=None):
         run_kwargs["capital"] = args.capital
     if args.alert in ("id_marketing_dwd_cnt", "marketing_dwd_cnt"):
         run_kwargs["skip_refresh"] = args.skip_refresh
+        run_kwargs["profile"] = args.profile
         run_kwargs["country_name"] = args.country_name
+        run_kwargs["platform_type"] = args.platform_type
         run_kwargs["check_table"] = args.check_table
         run_kwargs["table_names"] = args.table_names
     if args.limit is not None and args.alert in ("pl_monitor", "fin_ods_quality"):

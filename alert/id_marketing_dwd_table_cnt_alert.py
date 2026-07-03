@@ -45,7 +45,9 @@ DEFAULT_MENTIONS = [
     if item.strip()
 ]
 
+DEFAULT_PROFILE = "id"
 DEFAULT_COUNTRY_NAME = "印尼"
+DEFAULT_PLATFORM_TYPE = "投放"
 DEFAULT_CHECK_TABLE = "testdb.test_dwd_ad_table_cnt_check"
 CHECK_TABLE = DEFAULT_CHECK_TABLE
 IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$")
@@ -65,16 +67,32 @@ EXPECTED_TABLES = (
     "dwd_ad_tt_report",
 )
 
+MARKETING_DWD_PROFILES = {
+    "id": {"country_name": "印尼", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
+    "ine": {"country_name": "印尼", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
+    "indonesia": {"country_name": "印尼", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
+    "ph": {"country_name": "菲律宾", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
+    "philippines": {"country_name": "菲律宾", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
+    "th": {"country_name": "泰国", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
+    "thailand": {"country_name": "泰国", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
+    "mx": {"country_name": "墨西哥", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
+    "mexico": {"country_name": "墨西哥", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
+    "pk": {"country_name": "巴基斯坦", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
+    "pakistan": {"country_name": "巴基斯坦", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
+}
+
 
 @dataclass(frozen=True)
 class MarketingDwdCheckConfig:
+    profile: str = DEFAULT_PROFILE
     country_name: str = DEFAULT_COUNTRY_NAME
+    platform_type: str = DEFAULT_PLATFORM_TYPE
     check_table: str = DEFAULT_CHECK_TABLE
     expected_tables: tuple = EXPECTED_TABLES
 
     @property
     def alert_title(self):
-        return f"🚨 {self.country_name}投放DWD表T-1产出校验"
+        return f"🚨 {self.country_name}{self.platform_type}DWD表T-1产出校验"
 
 
 def parse_table_names(value):
@@ -91,14 +109,29 @@ def validate_identifier(value, field_name):
     return value
 
 
-def build_check_config(country_name=None, check_table=None, table_names=None):
-    resolved_check_table = check_table or os.environ.get("MARKETING_DWD_CHECK_TABLE", DEFAULT_CHECK_TABLE)
-    resolved_tables = parse_table_names(table_names or os.environ.get("MARKETING_DWD_TABLE_NAMES"))
+def get_profile_config(profile=None):
+    profile = (profile or os.environ.get("MARKETING_DWD_PROFILE", DEFAULT_PROFILE)).strip().lower()
+    if profile not in MARKETING_DWD_PROFILES:
+        available = ", ".join(sorted(MARKETING_DWD_PROFILES))
+        raise ValueError(f"unknown marketing DWD profile: {profile}; available profiles: {available}")
+    profile_config = dict(MARKETING_DWD_PROFILES[profile])
+    profile_config["profile"] = profile
+    return profile_config
+
+
+def build_check_config(profile=None, country_name=None, platform_type=None, check_table=None, table_names=None):
+    profile_config = get_profile_config(profile)
+    resolved_country_name = country_name or os.environ.get("MARKETING_DWD_COUNTRY_NAME") or profile_config["country_name"]
+    resolved_platform_type = platform_type or os.environ.get("MARKETING_DWD_PLATFORM_TYPE") or profile_config["platform_type"]
+    resolved_check_table = check_table or os.environ.get("MARKETING_DWD_CHECK_TABLE") or profile_config["check_table"]
+    resolved_tables = parse_table_names(table_names or os.environ.get("MARKETING_DWD_TABLE_NAMES") or profile_config["table_names"])
     validate_identifier(resolved_check_table, "check_table")
     for table_name in resolved_tables:
         validate_identifier(table_name, "table_name")
     return MarketingDwdCheckConfig(
-        country_name=country_name or os.environ.get("MARKETING_DWD_COUNTRY_NAME", DEFAULT_COUNTRY_NAME),
+        profile=profile_config["profile"],
+        country_name=resolved_country_name,
+        platform_type=resolved_platform_type,
         check_table=resolved_check_table,
         expected_tables=resolved_tables,
     )
@@ -320,13 +353,17 @@ def run(
     bot_id=None,
     target_date=None,
     skip_refresh=False,
+    profile=None,
     country_name=None,
+    platform_type=None,
     check_table=None,
     table_names=None,
 ):
     target_date = parse_date(target_date) or default_target_date()
     check_config = build_check_config(
+        profile=profile,
         country_name=country_name,
+        platform_type=platform_type,
         check_table=check_table,
         table_names=table_names,
     )
@@ -362,7 +399,9 @@ def parse_args(argv=None):
     parser.add_argument("--sr-password", default=None, help="StarRocks 主账号密码")
     parser.add_argument("--sr-backup-password", default=None, help="StarRocks 备份账号密码")
     parser.add_argument("--bot-id", default=None, help="指定发送使用的 TV 机器人 ID")
+    parser.add_argument("--profile", default=None, help="国家配置档，例如 id/ine/ph/th/mx/pk")
     parser.add_argument("--country-name", default=None, help="国家名称，例如 印尼、菲律宾、泰国")
+    parser.add_argument("--platform-type", default=None, help="平台类型，例如 投放")
     parser.add_argument("--check-table", default=None, help="校验结果表，默认 testdb.test_dwd_ad_table_cnt_check")
     parser.add_argument("--table-names", default=None, help="逗号分隔的 DWD 表名列表，默认使用投放 13 张表")
     parser.add_argument(
@@ -384,7 +423,9 @@ def main(argv=None):
         bot_id=args.bot_id,
         target_date=parse_date(args.target_date),
         skip_refresh=args.skip_refresh,
+        profile=args.profile,
         country_name=args.country_name,
+        platform_type=args.platform_type,
         check_table=args.check_table,
         table_names=args.table_names,
     )

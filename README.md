@@ -29,7 +29,7 @@ python3 alert/run_alert.py \
 - `pl_monitor`：中国 PL 监控告警
 - `fin_ods_quality`：中国数仓与财务库数据一致性校验告警
 - `mx_capital_ltv`：墨西哥资方 LTV 告警，可附加 `--capital new_share/chuanjin/all`
-- `marketing_dwd_cnt`：多国投放 DWD 表 T-1 产出校验告警，可附加 `--country-name`、`--check-table`、`--table-names`、`--target-date YYYY-MM-DD` 或 `--skip-refresh`
+- `marketing_dwd_cnt`：多国投放 DWD 表 T-1 产出校验告警，可附加 `--profile id/ine/ph/th/mx/pk`、`--platform-type`、`--country-name`、`--check-table`、`--table-names`、`--target-date YYYY-MM-DD` 或 `--skip-refresh`
 - `id_marketing_dwd_cnt`：印尼投放 DWD 表 T-1 产出校验旧入口，等价于 `marketing_dwd_cnt` 的印尼默认配置
 
 原脚本入口仍然兼容：
@@ -79,7 +79,7 @@ SR_USERNAME='e_load' \
 SR_BACKUP_USERNAME='backup_user' \
 python3 alert/run_alert.py \
   --alert marketing_dwd_cnt \
-  --country-name '菲律宾' \
+  --profile ph \
   --check-table 'testdb.test_dwd_ad_table_cnt_check' \
   --sr-password '主账号密码' \
   --sr-backup-password '备份账号密码' \
@@ -92,7 +92,7 @@ python3 alert/run_alert.py \
 ```bash
 python3 alert/run_alert.py \
   --alert marketing_dwd_cnt \
-  --country-name '泰国' \
+  --profile th \
   --table-names 'dwd_ad_tt_report,dwd_ad_tt_campaign_get' \
   --sr-password '主账号密码' \
   --sr-backup-password '备份账号密码'
@@ -152,6 +152,9 @@ python3 alert/id_marketing_dwd_table_cnt_alert.py \
 - 墨西哥资方 LTV 默认主账号: `e_load`
 - 墨西哥资方 LTV 默认备份账号: `backup_user`
 - 投放 DWD 表校验默认国家: `印尼`
+- 投放 DWD 表校验默认国家配置档: `id`
+- 投放 DWD 表校验内置国家配置档: `id/ine/indonesia`、`ph/philippines`、`th/thailand`、`mx/mexico`、`pk/pakistan`
+- 投放 DWD 表校验默认平台类型: `投放`
 - 投放 DWD 表校验默认结果表: `testdb.test_dwd_ad_table_cnt_check`
 - 投放 DWD 表校验默认 DB: `testdb`
 - 投放 DWD 表校验默认主账号: `e_load`
@@ -159,7 +162,7 @@ python3 alert/id_marketing_dwd_table_cnt_alert.py \
 
 可通过命令行参数覆盖默认值，例如任务传参 `--mentions 'owner@kn.group,backup@kn.group'`。也可通过环境变量覆盖：`SR_HOST`、`SR_PORT`、`SR_DB`、`SR_USERNAME`、`SR_BACKUP_USERNAME`、`TV_API_URL`、`MANAGE_MODEL_GLOBAL_PL_TV_BOT_ID`、`MANAGE_MODEL_GLOBAL_PL_TV_MENTIONS`、`FIN_MANAGE_ODS_DATA_QUALITY_TV_BOT_ID`、`FIN_MANAGE_ODS_DATA_QUALITY_TV_MENTIONS`。
 墨西哥资方 LTV 还可通过 `MX_CAPITAL_LTV_TV_BOT_ID`、`MX_CAPITAL_LTV_TV_MENTIONS` 覆盖 TV 机器人和默认 @ 人。
-投放 DWD 表校验还可通过 `ID_MARKETING_DWD_TABLE_CNT_TV_BOT_ID`、`ID_MARKETING_DWD_TABLE_CNT_TV_MENTIONS` 覆盖 TV 机器人和默认 @ 人，通过 `MARKETING_DWD_COUNTRY_NAME`、`MARKETING_DWD_CHECK_TABLE`、`MARKETING_DWD_TABLE_NAMES` 覆盖国家名、校验表和表清单。
+投放 DWD 表校验还可通过 `ID_MARKETING_DWD_TABLE_CNT_TV_BOT_ID`、`ID_MARKETING_DWD_TABLE_CNT_TV_MENTIONS` 覆盖 TV 机器人和默认 @ 人，通过 `MARKETING_DWD_PROFILE`、`MARKETING_DWD_COUNTRY_NAME`、`MARKETING_DWD_PLATFORM_TYPE`、`MARKETING_DWD_CHECK_TABLE`、`MARKETING_DWD_TABLE_NAMES` 覆盖国家配置档、国家名、平台类型、校验表和表清单。
 
 ## n8n 接入
 
@@ -176,5 +179,5 @@ python3 alert/id_marketing_dwd_table_cnt_alert.py \
 
 1. `Webhook` 触发路径 `ID_MARKETING_DWD_CNT`。
 2. `投放DWD告警代码拉取` 下载 `chenjiuxuan1/starrocks-pl-monitor-tv-alert` 的 GitHub main 分支到目标国家跳板机 `/root/starrocks-pl-monitor-tv-alert`。
-3. `投放DWD告警触发` 执行 `python3 alert/run_alert.py --alert marketing_dwd_cnt --country-name '国家名'`，脚本先创建/刷新校验表，再把每一个 `cnt <= 0` 或缺失校验结果的 DWD 表逐条发送到 TV。
-4. 每个国家只需要替换跳板机、SR 地址、密码、TV Bot、@ 人；如果表清单不同，再补 `--table-names`。
+3. `投放DWD告警触发` 执行 `python3 alert/run_alert.py --alert marketing_dwd_cnt --profile ph`，脚本先按平台配置生成国家名、平台类型、校验表和表清单，再创建/刷新校验表，把每一个 `cnt <= 0` 或缺失校验结果的 DWD 表逐条发送到 TV。
+4. 每个国家优先只替换 `--profile`、跳板机、SR 地址、密码、TV Bot、@ 人；如果表清单不同，再补 `--table-names`，如果告警类型不是“投放”，再补 `--platform-type`。

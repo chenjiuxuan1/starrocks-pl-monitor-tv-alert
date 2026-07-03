@@ -70,8 +70,12 @@ class RunAlertTests(unittest.TestCase):
                 [
                     "--alert",
                     "marketing_dwd_cnt",
+                    "--profile",
+                    "ph",
                     "--country-name",
                     "菲律宾",
+                    "--platform-type",
+                    "投放",
                     "--check-table",
                     "testdb.ph_dwd_ad_table_cnt_check",
                     "--table-names",
@@ -83,7 +87,9 @@ class RunAlertTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         kwargs = fake_alert.run.call_args.kwargs
+        self.assertEqual(kwargs["profile"], "ph")
         self.assertEqual(kwargs["country_name"], "菲律宾")
+        self.assertEqual(kwargs["platform_type"], "投放")
         self.assertEqual(kwargs["check_table"], "testdb.ph_dwd_ad_table_cnt_check")
         self.assertEqual(kwargs["table_names"], "dwd_ad_tt_report,dwd_ad_tt_campaign_get")
         self.assertTrue(kwargs["skip_refresh"])
