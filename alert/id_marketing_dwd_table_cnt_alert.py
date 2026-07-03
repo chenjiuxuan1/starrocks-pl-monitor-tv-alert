@@ -66,6 +66,24 @@ EXPECTED_TABLES = (
     "dwd_ad_tt_campaign_get",
     "dwd_ad_tt_report",
 )
+MX_EXPECTED_TABLES = (
+    "dwd_ad_gg_campaign_unique_users",
+    "dwd_ad_gg_conversion_action",
+    "dwd_ad_gg_placement",
+    "dwd_ad_group_snapshot_h",
+    "dwd_ad_insight_snapahot_h",
+    "dwd_ad_platform_info",
+    "dwd_ad_report_snapshot_h",
+    "dwd_ad_tt_ad_get",
+    "dwd_ad_tt_ad_group_get",
+    "dwd_ad_tt_ad_report_age_gender",
+    "dwd_ad_tt_advertiser_get",
+    "dwd_ad_tt_audience_get",
+    "dwd_ad_tt_audience_list",
+    "dwd_ad_tt_campaign_get",
+    "dwd_ad_tt_report",
+    "dwd_ad_tt_report_placement",
+)
 
 MARKETING_DWD_PROFILES = {
     "id": {"country_name": "印尼", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
@@ -75,8 +93,8 @@ MARKETING_DWD_PROFILES = {
     "philippines": {"country_name": "菲律宾", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
     "th": {"country_name": "泰国", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
     "thailand": {"country_name": "泰国", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
-    "mx": {"country_name": "墨西哥", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
-    "mexico": {"country_name": "墨西哥", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
+    "mx": {"country_name": "墨西哥", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": MX_EXPECTED_TABLES},
+    "mexico": {"country_name": "墨西哥", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": MX_EXPECTED_TABLES},
     "pk": {"country_name": "巴基斯坦", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
     "pakistan": {"country_name": "巴基斯坦", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
 }

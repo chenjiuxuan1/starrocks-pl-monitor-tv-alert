@@ -118,6 +118,18 @@ class IdMarketingDwdTableCntAlertTests(unittest.TestCase):
         self.assertEqual(check_config.check_table, "testdb.test_dwd_ad_table_cnt_check")
         self.assertEqual(check_config.expected_tables, module.EXPECTED_TABLES)
 
+    def test_build_check_config_selects_mx_profile_without_canceled_tables(self):
+        module = load_module()
+
+        check_config = module.build_check_config(profile="mx")
+
+        self.assertEqual(check_config.country_name, "墨西哥")
+        self.assertEqual(len(check_config.expected_tables), 16)
+        self.assertIn("dwd_ad_gg_campaign_unique_users", check_config.expected_tables)
+        self.assertIn("dwd_ad_tt_report_placement", check_config.expected_tables)
+        self.assertNotIn("dwd_ad_platform_report_full", check_config.expected_tables)
+        self.assertNotIn("dwd_ad_platform_report_snap", check_config.expected_tables)
+
     def test_build_check_config_allows_platform_type_override(self):
         module = load_module()
 
