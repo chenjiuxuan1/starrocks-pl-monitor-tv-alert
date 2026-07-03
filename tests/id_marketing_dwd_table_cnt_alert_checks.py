@@ -294,6 +294,7 @@ class IdMarketingDwdTableCntAlertTests(unittest.TestCase):
             {"table_name": table_name, "cnt": 1, "check_time": "2026-07-02 08:00:00"}
             for table_name in module.EXPECTED_TABLES
         ]
+        rows[0]["cnt"] = 0
 
         with mock.patch.object(module, "refresh_check_table") as refresh:
             with mock.patch.object(module, "fetch_check_rows", return_value=rows) as fetch:
@@ -320,6 +321,32 @@ class IdMarketingDwdTableCntAlertTests(unittest.TestCase):
         self.assertIn("校验表: testdb.ph_dwd_ad_table_cnt_check", send.call_args.args[0])
         self.assertEqual(send.call_args.kwargs["mentions"], ["owner@kn.group"])
         self.assertEqual(send.call_args.kwargs["bot_id"], "bot-1")
+
+    def test_run_skips_tv_when_no_problem_tables(self):
+        module = load_module()
+        rows = [
+            {"table_name": table_name, "cnt": 1, "check_time": "2026-07-02 08:00:00"}
+            for table_name in module.EXPECTED_TABLES
+        ]
+
+        with mock.patch.object(module, "refresh_check_table") as refresh:
+            with mock.patch.object(module, "fetch_check_rows", return_value=rows) as fetch:
+                with mock.patch.object(module, "send_to_tv") as send:
+                    with mock.patch("builtins.print") as print_mock:
+                        result = module.run(
+                            target_date=date(2026, 7, 1),
+                            mentions=["owner@kn.group"],
+                            sr_password="primary-secret",
+                            sr_backup_password="backup-secret",
+                            bot_id="bot-1",
+                        )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["response"], "no_problems")
+        refresh.assert_called_once()
+        fetch.assert_called_once()
+        send.assert_not_called()
+        self.assertIn("跳过TV告警发送", print_mock.call_args.args[0])
 
     def test_send_to_tv_uses_mentions_payload(self):
         module = load_module()

@@ -392,7 +392,15 @@ def run(
     if not skip_refresh:
         refresh_check_table(target_date=target_date, config=config, check_config=check_config)
     rows = fetch_check_rows(target_date=target_date, config=config, check_config=check_config)
-    message = format_alert_message(rows, target_date=target_date, check_config=check_config)
+    problems = find_problem_tables(rows, expected_tables=check_config.expected_tables)
+    if not problems:
+        print(
+            f"✅ {check_config.country_name}{check_config.platform_type}DWD表T-1产出校验无异常，"
+            f"统计日期 {target_date.strftime('%Y-%m-%d')}，跳过TV告警发送"
+        )
+        return {"success": True, "status_code": None, "response": "no_problems"}
+
+    message = format_alert_message(rows, target_date=target_date, problems=problems, check_config=check_config)
     if not message.endswith("\n"):
         message = f"{message}\n"
 
