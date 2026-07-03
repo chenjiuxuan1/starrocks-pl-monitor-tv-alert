@@ -60,6 +60,34 @@ class RunAlertTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(fake_alert.run.call_args.kwargs["capital"], "new_share")
 
+    def test_main_passes_marketing_dwd_country_arguments(self):
+        module = load_module()
+        fake_alert = mock.Mock()
+        fake_alert.run.return_value = {"success": True, "status_code": None, "response": "ok"}
+
+        with mock.patch.dict(module.ALERT_MODULES, {"marketing_dwd_cnt": fake_alert}):
+            exit_code = module.main(
+                [
+                    "--alert",
+                    "marketing_dwd_cnt",
+                    "--country-name",
+                    "菲律宾",
+                    "--check-table",
+                    "testdb.ph_dwd_ad_table_cnt_check",
+                    "--table-names",
+                    "dwd_ad_tt_report,dwd_ad_tt_campaign_get",
+                    "--skip-refresh",
+                    "--dry-run",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        kwargs = fake_alert.run.call_args.kwargs
+        self.assertEqual(kwargs["country_name"], "菲律宾")
+        self.assertEqual(kwargs["check_table"], "testdb.ph_dwd_ad_table_cnt_check")
+        self.assertEqual(kwargs["table_names"], "dwd_ad_tt_report,dwd_ad_tt_campaign_get")
+        self.assertTrue(kwargs["skip_refresh"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -16,6 +16,7 @@ ALERT_MODULES = {
     "fin_ods_quality": "alert.fin_manage_ods_data_quality_monitor_alert",
     "mx_capital_ltv": "alert.mx_capital_ltv_alert",
     "id_marketing_dwd_cnt": "alert.id_marketing_dwd_table_cnt_alert",
+    "marketing_dwd_cnt": "alert.id_marketing_dwd_table_cnt_alert",
 }
 
 
@@ -35,7 +36,10 @@ def parse_args(argv=None):
     parser.add_argument("--bot-id", default=None, help="指定发送使用的 TV 机器人 ID")
     parser.add_argument("--mentions", default="", help="逗号分隔的提醒邮箱列表")
     parser.add_argument("--capital", default=None, help="墨西哥资方 LTV 参数：all/new_share/chuanjin")
-    parser.add_argument("--skip-refresh", action="store_true", help="印尼投放 DWD 校验跳过刷新")
+    parser.add_argument("--skip-refresh", action="store_true", help="投放 DWD 校验跳过刷新")
+    parser.add_argument("--country-name", default=None, help="投放 DWD 校验国家名称，例如 印尼、菲律宾、泰国")
+    parser.add_argument("--check-table", default=None, help="投放 DWD 校验结果表")
+    parser.add_argument("--table-names", default=None, help="逗号分隔的投放 DWD 表名列表")
     parser.add_argument("--limit", type=int, default=None, help="兼容旧告警脚本参数")
     return parser.parse_args(argv)
 
@@ -58,8 +62,11 @@ def main(argv=None):
         run_kwargs["target_date"] = parse_date(args.target_date)
     if args.alert == "mx_capital_ltv" and args.capital:
         run_kwargs["capital"] = args.capital
-    if args.alert == "id_marketing_dwd_cnt":
+    if args.alert in ("id_marketing_dwd_cnt", "marketing_dwd_cnt"):
         run_kwargs["skip_refresh"] = args.skip_refresh
+        run_kwargs["country_name"] = args.country_name
+        run_kwargs["check_table"] = args.check_table
+        run_kwargs["table_names"] = args.table_names
     if args.limit is not None and args.alert in ("pl_monitor", "fin_ods_quality"):
         run_kwargs["limit"] = args.limit
 

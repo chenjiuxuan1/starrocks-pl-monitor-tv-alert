@@ -85,6 +85,28 @@ class IdMarketingDwdTableCntAlertTests(unittest.TestCase):
         self.assertNotIn("dwd_ad_gg_campaign_unique_users", sql)
         self.assertEqual(sql.count("union all"), len(module.EXPECTED_TABLES) - 1)
 
+    def test_build_refresh_sql_uses_custom_country_check_config(self):
+        module = load_module()
+        check_config = module.MarketingDwdCheckConfig(
+            country_name="菲律宾",
+            check_table="testdb.ph_dwd_ad_table_cnt_check",
+            expected_tables=("dwd_ad_tt_report", "dwd_ad_tt_campaign_get"),
+        )
+
+        sql = module.build_refresh_sql(date(2026, 7, 1), check_config=check_config)
+
+        self.assertIn("INSERT OVERWRITE testdb.ph_dwd_ad_table_cnt_check", sql)
+        self.assertIn("from dwd.dwd_ad_tt_report where dt = '2026-07-01'", sql)
+        self.assertIn("from dwd.dwd_ad_tt_campaign_get where dt = '2026-07-01'", sql)
+        self.assertNotIn("dwd_ad_gg_conversion_action", sql)
+        self.assertEqual(sql.count("union all"), 1)
+
+    def test_build_check_config_rejects_unsafe_table_identifier(self):
+        module = load_module()
+
+        with self.assertRaises(ValueError):
+            module.build_check_config(table_names="dwd_ad_tt_report;drop table x")
+
     def test_refresh_check_table_creates_table_and_inserts_counts(self):
         module = load_module()
         fake_conn = FakeConnection()
@@ -124,6 +146,28 @@ class IdMarketingDwdTableCntAlertTests(unittest.TestCase):
         self.assertIn("from testdb.test_dwd_ad_table_cnt_check", sql)
         self.assertEqual(params, ("2026-07-01",))
         self.assertTrue(fake_conn.closed)
+
+    def test_fetch_check_rows_uses_custom_check_table(self):
+        module = load_module()
+        fake_conn = FakeConnection(rows=[])
+        config = module.StarRocksConfig(
+            host="sr-ph.example.com",
+            port=9030,
+            db="testdb",
+            primary=module.StarRocksAccount(username="e_load", password="secret"),
+            backup=module.StarRocksAccount(username="backup_user", password="backup-secret"),
+        )
+        check_config = module.MarketingDwdCheckConfig(
+            country_name="菲律宾",
+            check_table="testdb.ph_dwd_ad_table_cnt_check",
+            expected_tables=module.EXPECTED_TABLES,
+        )
+
+        with mock.patch.object(module.pymysql, "connect", return_value=fake_conn):
+            module.fetch_check_rows(target_date=date(2026, 7, 1), config=config, check_config=check_config)
+
+        sql, _ = fake_conn.cursor_obj.executed[0]
+        self.assertIn("from testdb.ph_dwd_ad_table_cnt_check", sql)
 
     def test_find_problem_tables_reports_zero_and_missing_tables(self):
         module = load_module()
@@ -171,6 +215,29 @@ class IdMarketingDwdTableCntAlertTests(unittest.TestCase):
         self.assertIn("1. dwd_ad_gg_conversion_action | cnt=0 | 2026-07-01 数据量为0，数据有问题", message)
         self.assertIn("2. dwd_ad_platform_report_snap | cnt=0 | 2026-07-01 数据量为0，数据有问题", message)
 
+    def test_format_alert_message_uses_custom_country_name_and_expected_tables(self):
+        module = load_module()
+        check_config = module.MarketingDwdCheckConfig(
+            country_name="泰国",
+            check_table="testdb.th_dwd_ad_table_cnt_check",
+            expected_tables=("dwd_ad_tt_report", "dwd_ad_tt_campaign_get"),
+        )
+        rows = [
+            {
+                "dt": date(2026, 7, 1),
+                "table_name": "dwd_ad_tt_report",
+                "cnt": 0,
+                "check_time": datetime(2026, 7, 2, 8, 0, 0),
+            }
+        ]
+
+        message = module.format_alert_message(rows, target_date=date(2026, 7, 1), check_config=check_config)
+
+        self.assertIn("泰国投放DWD表T-1产出校验", message)
+        self.assertIn("校验表: testdb.th_dwd_ad_table_cnt_check", message)
+        self.assertIn("预期表数: 2，实际校验结果: 1，异常表数: 2", message)
+        self.assertIn("dwd_ad_tt_campaign_get | cnt=未查询到 | 2026-07-01 校验结果缺失，数据有问题", message)
+
     def test_format_alert_message_outputs_normal_summary_without_problems(self):
         module = load_module()
         rows = [
@@ -204,12 +271,15 @@ class IdMarketingDwdTableCntAlertTests(unittest.TestCase):
                             sr_password="primary-secret",
                             sr_backup_password="backup-secret",
                             bot_id="bot-1",
+                            country_name="菲律宾",
+                            check_table="testdb.ph_dwd_ad_table_cnt_check",
                         )
 
         self.assertTrue(result["success"])
         refresh.assert_called_once()
         fetch.assert_called_once()
-        self.assertIn("印尼投放DWD表T-1产出校验", send.call_args.args[0])
+        self.assertIn("菲律宾投放DWD表T-1产出校验", send.call_args.args[0])
+        self.assertIn("校验表: testdb.ph_dwd_ad_table_cnt_check", send.call_args.args[0])
         self.assertEqual(send.call_args.kwargs["mentions"], ["owner@kn.group"])
         self.assertEqual(send.call_args.kwargs["bot_id"], "bot-1")
 

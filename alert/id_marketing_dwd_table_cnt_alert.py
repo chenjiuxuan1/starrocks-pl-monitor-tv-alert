@@ -9,8 +9,10 @@ every expected DWD table whose T-1 partition count is zero or missing.
 
 import argparse
 import os
+import re
 import sys
 from datetime import date, datetime, timedelta
+from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -43,7 +45,10 @@ DEFAULT_MENTIONS = [
     if item.strip()
 ]
 
-CHECK_TABLE = "testdb.test_dwd_ad_table_cnt_check"
+DEFAULT_COUNTRY_NAME = "印尼"
+DEFAULT_CHECK_TABLE = "testdb.test_dwd_ad_table_cnt_check"
+CHECK_TABLE = DEFAULT_CHECK_TABLE
+IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$")
 EXPECTED_TABLES = (
     "dwd_ad_gg_conversion_action",
     "dwd_ad_gg_placement",
@@ -60,8 +65,48 @@ EXPECTED_TABLES = (
     "dwd_ad_tt_report",
 )
 
-CREATE_CHECK_TABLE_SQL = f"""
-CREATE TABLE IF NOT EXISTS {CHECK_TABLE} (
+
+@dataclass(frozen=True)
+class MarketingDwdCheckConfig:
+    country_name: str = DEFAULT_COUNTRY_NAME
+    check_table: str = DEFAULT_CHECK_TABLE
+    expected_tables: tuple = EXPECTED_TABLES
+
+    @property
+    def alert_title(self):
+        return f"🚨 {self.country_name}投放DWD表T-1产出校验"
+
+
+def parse_table_names(value):
+    if value is None:
+        return EXPECTED_TABLES
+    if isinstance(value, (tuple, list)):
+        return tuple(item.strip() for item in value if str(item).strip())
+    return tuple(item.strip() for item in str(value).split(",") if item.strip())
+
+
+def validate_identifier(value, field_name):
+    if not IDENTIFIER_PATTERN.match(value or ""):
+        raise ValueError(f"{field_name} must be a table identifier like table_name or db.table_name: {value}")
+    return value
+
+
+def build_check_config(country_name=None, check_table=None, table_names=None):
+    resolved_check_table = check_table or os.environ.get("MARKETING_DWD_CHECK_TABLE", DEFAULT_CHECK_TABLE)
+    resolved_tables = parse_table_names(table_names or os.environ.get("MARKETING_DWD_TABLE_NAMES"))
+    validate_identifier(resolved_check_table, "check_table")
+    for table_name in resolved_tables:
+        validate_identifier(table_name, "table_name")
+    return MarketingDwdCheckConfig(
+        country_name=country_name or os.environ.get("MARKETING_DWD_COUNTRY_NAME", DEFAULT_COUNTRY_NAME),
+        check_table=resolved_check_table,
+        expected_tables=resolved_tables,
+    )
+
+
+def build_create_check_table_sql(check_table=DEFAULT_CHECK_TABLE):
+    return f"""
+CREATE TABLE IF NOT EXISTS {check_table} (
     dt DATE COMMENT 'Data date',
     table_name VARCHAR(128) COMMENT 'DWD table name',
     cnt BIGINT COMMENT 'T-1 partition row count',
@@ -73,6 +118,9 @@ PROPERTIES (
     "replication_num" = "1"
 )
 """
+
+
+CREATE_CHECK_TABLE_SQL = build_create_check_table_sql(DEFAULT_CHECK_TABLE)
 
 
 StarRocksAccount = sr_client.StarRocksAccount
@@ -113,17 +161,21 @@ def _quote_date(value):
     return parse_date(value).strftime("%Y-%m-%d")
 
 
-def build_refresh_sql(target_date):
+def build_refresh_sql(target_date, check_config=None, check_table=None, expected_tables=None):
+    check_config = check_config or MarketingDwdCheckConfig(
+        check_table=check_table or DEFAULT_CHECK_TABLE,
+        expected_tables=tuple(expected_tables or EXPECTED_TABLES),
+    )
     dt = _quote_date(target_date)
     parts = [
         (
             f"select '{table_name}' as table_name, count(1) as cnt "
             f"from dwd.{table_name} where dt = '{dt}'"
         )
-        for table_name in EXPECTED_TABLES
+        for table_name in check_config.expected_tables
     ]
     return (
-        f"INSERT OVERWRITE {CHECK_TABLE}\n"
+        f"INSERT OVERWRITE {check_config.check_table}\n"
         "SELECT\n"
         f"    '{dt}' AS dt,\n"
         "    table_name,\n"
@@ -135,8 +187,9 @@ def build_refresh_sql(target_date):
     )
 
 
-def refresh_check_table(target_date=None, config=None, sr_password=None, sr_backup_password=None):
+def refresh_check_table(target_date=None, config=None, sr_password=None, sr_backup_password=None, check_config=None):
     target_date = parse_date(target_date) or default_target_date()
+    check_config = check_config or build_check_config()
     if config is None:
         config = get_starrocks_config(
             sr_password=sr_password,
@@ -145,21 +198,22 @@ def refresh_check_table(target_date=None, config=None, sr_password=None, sr_back
     conn = get_connection(config=config)
     try:
         cursor = conn.cursor()
-        cursor.execute(CREATE_CHECK_TABLE_SQL)
-        cursor.execute(build_refresh_sql(target_date))
+        cursor.execute(build_create_check_table_sql(check_config.check_table))
+        cursor.execute(build_refresh_sql(target_date, check_config=check_config))
     finally:
         conn.close()
 
 
-def fetch_check_rows(target_date=None, config=None, sr_password=None, sr_backup_password=None):
+def fetch_check_rows(target_date=None, config=None, sr_password=None, sr_backup_password=None, check_config=None):
     target_date = parse_date(target_date) or default_target_date()
+    check_config = check_config or build_check_config()
     if config is None:
         config = get_starrocks_config(
             sr_password=sr_password,
             sr_backup_password=sr_backup_password,
         )
     sql = (
-        f"select dt, table_name, cnt, check_time from {CHECK_TABLE} "
+        f"select dt, table_name, cnt, check_time from {check_config.check_table} "
         "where dt = %s order by table_name"
     )
     conn = get_connection(config=config)
@@ -206,9 +260,10 @@ def _format_count(value):
     return f"{_to_int(value):,}"
 
 
-def format_alert_message(rows, target_date=None, problems=None):
+def format_alert_message(rows, target_date=None, problems=None, check_config=None):
     target_date = parse_date(target_date) or default_target_date()
-    problems = find_problem_tables(rows) if problems is None else problems
+    check_config = check_config or build_check_config()
+    problems = find_problem_tables(rows, expected_tables=check_config.expected_tables) if problems is None else problems
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     latest_check_time = ""
     for row in rows:
@@ -217,11 +272,11 @@ def format_alert_message(rows, target_date=None, problems=None):
             latest_check_time = check_time
 
     lines = [
-        "🚨 印尼投放DWD表T-1产出校验",
+        check_config.alert_title,
         f"告警时间: {now}",
         f"统计日期: {target_date.strftime('%Y-%m-%d')}",
-        f"校验表: {CHECK_TABLE}",
-        f"预期表数: {len(EXPECTED_TABLES)}，实际校验结果: {len(rows)}，异常表数: {len(problems)}",
+        f"校验表: {check_config.check_table}",
+        f"预期表数: {len(check_config.expected_tables)}，实际校验结果: {len(rows)}，异常表数: {len(problems)}",
     ]
     if latest_check_time:
         lines.append(f"最近校验时间: {latest_check_time}")
@@ -257,16 +312,32 @@ def send_to_tv(message, mentions=None, bot_id=None, api_url=None):
     )
 
 
-def run(dry_run=False, mentions=None, sr_password=None, sr_backup_password=None, bot_id=None, target_date=None, skip_refresh=False):
+def run(
+    dry_run=False,
+    mentions=None,
+    sr_password=None,
+    sr_backup_password=None,
+    bot_id=None,
+    target_date=None,
+    skip_refresh=False,
+    country_name=None,
+    check_table=None,
+    table_names=None,
+):
     target_date = parse_date(target_date) or default_target_date()
+    check_config = build_check_config(
+        country_name=country_name,
+        check_table=check_table,
+        table_names=table_names,
+    )
     config = get_starrocks_config(
         sr_password=sr_password,
         sr_backup_password=sr_backup_password,
     )
     if not skip_refresh:
-        refresh_check_table(target_date=target_date, config=config)
-    rows = fetch_check_rows(target_date=target_date, config=config)
-    message = format_alert_message(rows, target_date=target_date)
+        refresh_check_table(target_date=target_date, config=config, check_config=check_config)
+    rows = fetch_check_rows(target_date=target_date, config=config, check_config=check_config)
+    message = format_alert_message(rows, target_date=target_date, check_config=check_config)
     if not message.endswith("\n"):
         message = f"{message}\n"
 
@@ -291,6 +362,9 @@ def parse_args(argv=None):
     parser.add_argument("--sr-password", default=None, help="StarRocks 主账号密码")
     parser.add_argument("--sr-backup-password", default=None, help="StarRocks 备份账号密码")
     parser.add_argument("--bot-id", default=None, help="指定发送使用的 TV 机器人 ID")
+    parser.add_argument("--country-name", default=None, help="国家名称，例如 印尼、菲律宾、泰国")
+    parser.add_argument("--check-table", default=None, help="校验结果表，默认 testdb.test_dwd_ad_table_cnt_check")
+    parser.add_argument("--table-names", default=None, help="逗号分隔的 DWD 表名列表，默认使用投放 13 张表")
     parser.add_argument(
         "--mentions",
         default=",".join(DEFAULT_MENTIONS),
@@ -310,6 +384,9 @@ def main(argv=None):
         bot_id=args.bot_id,
         target_date=parse_date(args.target_date),
         skip_refresh=args.skip_refresh,
+        country_name=args.country_name,
+        check_table=args.check_table,
+        table_names=args.table_names,
     )
     return 0 if result["success"] else 1
 

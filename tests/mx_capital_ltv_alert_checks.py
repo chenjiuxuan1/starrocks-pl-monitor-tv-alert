@@ -393,41 +393,9 @@ class MxCapitalLtvAlertTests(unittest.TestCase):
         self.assertEqual(captured["target_date"], date(2026, 6, 21))
         self.assertEqual(captured["capital"], "chuanjin")
 
-    def test_n8n_workflows_are_split_by_capital_with_separate_webhooks(self):
-        expected_bot_id = "5d0be3c3-0e06-4134-bbbe-690d7ff28d1e"
-        workflow_specs = [
-            (
-                "n8n/mx_new_share_ltv_alert_workflow.json",
-                "墨西哥新分享ltv告警",
-                "MX_NEW_SHARE_LTV",
-                "--capital new_share",
-                "--capital chuanjin",
-            ),
-            (
-                "n8n/mx_chuanjin_ltv_alert_workflow.json",
-                "墨西哥串金ltv告警",
-                "MX_CHUANJIN_LTV",
-                "--capital chuanjin",
-                "--capital new_share",
-            ),
-        ]
-
-        webhook_paths = set()
-        for relative_path, workflow_name, webhook_path, included_flag, excluded_flag in workflow_specs:
-            workflow = json.loads((REPO_ROOT / relative_path).read_text(encoding="utf-8"))
-            self.assertEqual(workflow["name"], workflow_name)
-            webhook_nodes = [node for node in workflow["nodes"] if node["type"] == "n8n-nodes-base.webhook"]
-            run_nodes = [node for node in workflow["nodes"] if node["name"].endswith("LTV告警触发")]
-            self.assertEqual(len(webhook_nodes), 1)
-            self.assertEqual(len(run_nodes), 1)
-            self.assertEqual(webhook_nodes[0]["parameters"]["path"], webhook_path)
-            webhook_paths.add(webhook_path)
-            command = run_nodes[0]["parameters"]["command"]
-            self.assertIn(included_flag, command)
-            self.assertNotIn(excluded_flag, command)
-            self.assertIn(f"--bot-id '{expected_bot_id}'", command)
-
-        self.assertEqual(webhook_paths, {"MX_NEW_SHARE_LTV", "MX_CHUANJIN_LTV"})
+    def test_obsolete_split_mx_ltv_n8n_workflows_are_removed(self):
+        self.assertFalse((REPO_ROOT / "n8n/mx_new_share_ltv_alert_workflow.json").exists())
+        self.assertFalse((REPO_ROOT / "n8n/mx_chuanjin_ltv_alert_workflow.json").exists())
 
 
 if __name__ == "__main__":
