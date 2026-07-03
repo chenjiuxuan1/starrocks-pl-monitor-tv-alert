@@ -77,8 +77,12 @@ class IdMarketingDwdTableCntAlertTests(unittest.TestCase):
 
         sql = module.build_refresh_sql(date(2026, 7, 1))
 
-        self.assertIn("INSERT OVERWRITE testdb.test_dwd_ad_table_cnt_check", sql)
+        self.assertIn("INSERT INTO testdb.test_dwd_ad_table_cnt_check", sql)
+        self.assertIn("(dt, country_code, platform_type, table_name, country_name, cnt, check_time)", sql)
         self.assertIn("'2026-07-01' AS dt", sql)
+        self.assertIn("'id' AS country_code", sql)
+        self.assertIn("'投放' AS platform_type", sql)
+        self.assertIn("'印尼' AS country_name", sql)
         for table_name in module.EXPECTED_TABLES:
             self.assertIn(f"from dwd.{table_name}", sql)
             self.assertIn(f"select '{table_name}' as table_name", sql)
@@ -95,7 +99,7 @@ class IdMarketingDwdTableCntAlertTests(unittest.TestCase):
 
         sql = module.build_refresh_sql(date(2026, 7, 1), check_config=check_config)
 
-        self.assertIn("INSERT OVERWRITE testdb.ph_dwd_ad_table_cnt_check", sql)
+        self.assertIn("INSERT INTO testdb.ph_dwd_ad_table_cnt_check", sql)
         self.assertIn("from dwd.dwd_ad_tt_report where dt = '2026-07-01'", sql)
         self.assertIn("from dwd.dwd_ad_tt_campaign_get where dt = '2026-07-01'", sql)
         self.assertNotIn("dwd_ad_gg_conversion_action", sql)
@@ -113,6 +117,7 @@ class IdMarketingDwdTableCntAlertTests(unittest.TestCase):
         check_config = module.build_check_config(profile="ph")
 
         self.assertEqual(check_config.profile, "ph")
+        self.assertEqual(check_config.country_code, "ph")
         self.assertEqual(check_config.country_name, "菲律宾")
         self.assertEqual(check_config.platform_type, "投放")
         self.assertEqual(check_config.check_table, "testdb.test_dwd_ad_table_cnt_check")
@@ -124,6 +129,7 @@ class IdMarketingDwdTableCntAlertTests(unittest.TestCase):
         check_config = module.build_check_config(profile="mx")
 
         self.assertEqual(check_config.country_name, "墨西哥")
+        self.assertEqual(check_config.country_code, "mx")
         self.assertEqual(len(check_config.expected_tables), 16)
         self.assertIn("dwd_ad_gg_campaign_unique_users", check_config.expected_tables)
         self.assertIn("dwd_ad_tt_report_placement", check_config.expected_tables)
@@ -159,9 +165,12 @@ class IdMarketingDwdTableCntAlertTests(unittest.TestCase):
         with mock.patch.object(module.pymysql, "connect", return_value=fake_conn):
             module.refresh_check_table(target_date=date(2026, 7, 1), config=config)
 
-        self.assertEqual(len(fake_conn.cursor_obj.executed), 2)
+        self.assertEqual(len(fake_conn.cursor_obj.executed), 3)
         self.assertIn("CREATE TABLE IF NOT EXISTS testdb.test_dwd_ad_table_cnt_check", fake_conn.cursor_obj.executed[0][0])
-        self.assertIn("INSERT OVERWRITE testdb.test_dwd_ad_table_cnt_check", fake_conn.cursor_obj.executed[1][0])
+        self.assertIn("DUPLICATE KEY(dt, country_code, platform_type, table_name)", fake_conn.cursor_obj.executed[0][0])
+        self.assertIn("DELETE FROM testdb.test_dwd_ad_table_cnt_check", fake_conn.cursor_obj.executed[1][0])
+        self.assertIn("country_code = 'id'", fake_conn.cursor_obj.executed[1][0])
+        self.assertIn("INSERT INTO testdb.test_dwd_ad_table_cnt_check", fake_conn.cursor_obj.executed[2][0])
         self.assertTrue(fake_conn.closed)
 
     def test_fetch_check_rows_queries_target_date(self):
@@ -182,7 +191,9 @@ class IdMarketingDwdTableCntAlertTests(unittest.TestCase):
         self.assertEqual(result, rows)
         sql, params = fake_conn.cursor_obj.executed[0]
         self.assertIn("from testdb.test_dwd_ad_table_cnt_check", sql)
-        self.assertEqual(params, ("2026-07-01",))
+        self.assertIn("country_code = %s", sql)
+        self.assertIn("platform_type = %s", sql)
+        self.assertEqual(params, ("2026-07-01", "id", "投放"))
         self.assertTrue(fake_conn.closed)
 
     def test_fetch_check_rows_uses_custom_check_table(self):

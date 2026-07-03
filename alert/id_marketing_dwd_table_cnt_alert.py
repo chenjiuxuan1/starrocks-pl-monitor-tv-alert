@@ -86,23 +86,24 @@ MX_EXPECTED_TABLES = (
 )
 
 MARKETING_DWD_PROFILES = {
-    "id": {"country_name": "印尼", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
-    "ine": {"country_name": "印尼", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
-    "indonesia": {"country_name": "印尼", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
-    "ph": {"country_name": "菲律宾", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
-    "philippines": {"country_name": "菲律宾", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
-    "th": {"country_name": "泰国", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
-    "thailand": {"country_name": "泰国", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
-    "mx": {"country_name": "墨西哥", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": MX_EXPECTED_TABLES},
-    "mexico": {"country_name": "墨西哥", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": MX_EXPECTED_TABLES},
-    "pk": {"country_name": "巴基斯坦", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
-    "pakistan": {"country_name": "巴基斯坦", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
+    "id": {"country_code": "id", "country_name": "印尼", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
+    "ine": {"country_code": "id", "country_name": "印尼", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
+    "indonesia": {"country_code": "id", "country_name": "印尼", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
+    "ph": {"country_code": "ph", "country_name": "菲律宾", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
+    "philippines": {"country_code": "ph", "country_name": "菲律宾", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
+    "th": {"country_code": "th", "country_name": "泰国", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
+    "thailand": {"country_code": "th", "country_name": "泰国", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
+    "mx": {"country_code": "mx", "country_name": "墨西哥", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": MX_EXPECTED_TABLES},
+    "mexico": {"country_code": "mx", "country_name": "墨西哥", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": MX_EXPECTED_TABLES},
+    "pk": {"country_code": "pk", "country_name": "巴基斯坦", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
+    "pakistan": {"country_code": "pk", "country_name": "巴基斯坦", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
 }
 
 
 @dataclass(frozen=True)
 class MarketingDwdCheckConfig:
     profile: str = DEFAULT_PROFILE
+    country_code: str = DEFAULT_PROFILE
     country_name: str = DEFAULT_COUNTRY_NAME
     platform_type: str = DEFAULT_PLATFORM_TYPE
     check_table: str = DEFAULT_CHECK_TABLE
@@ -139,6 +140,7 @@ def get_profile_config(profile=None):
 
 def build_check_config(profile=None, country_name=None, platform_type=None, check_table=None, table_names=None):
     profile_config = get_profile_config(profile)
+    resolved_country_code = profile_config["country_code"]
     resolved_country_name = country_name or os.environ.get("MARKETING_DWD_COUNTRY_NAME") or profile_config["country_name"]
     resolved_platform_type = platform_type or os.environ.get("MARKETING_DWD_PLATFORM_TYPE") or profile_config["platform_type"]
     resolved_check_table = check_table or os.environ.get("MARKETING_DWD_CHECK_TABLE") or profile_config["check_table"]
@@ -148,6 +150,7 @@ def build_check_config(profile=None, country_name=None, platform_type=None, chec
         validate_identifier(table_name, "table_name")
     return MarketingDwdCheckConfig(
         profile=profile_config["profile"],
+        country_code=resolved_country_code,
         country_name=resolved_country_name,
         platform_type=resolved_platform_type,
         check_table=resolved_check_table,
@@ -159,12 +162,15 @@ def build_create_check_table_sql(check_table=DEFAULT_CHECK_TABLE):
     return f"""
 CREATE TABLE IF NOT EXISTS {check_table} (
     dt DATE COMMENT 'Data date',
+    country_code VARCHAR(32) COMMENT 'Country code',
+    platform_type VARCHAR(64) COMMENT 'Platform type',
     table_name VARCHAR(128) COMMENT 'DWD table name',
+    country_name VARCHAR(64) COMMENT 'Country name',
     cnt BIGINT COMMENT 'T-1 partition row count',
     check_time DATETIME COMMENT 'Check time'
 )
-DUPLICATE KEY(dt, table_name)
-DISTRIBUTED BY HASH(table_name) BUCKETS 4
+DUPLICATE KEY(dt, country_code, platform_type, table_name)
+DISTRIBUTED BY HASH(country_code, table_name) BUCKETS 8
 PROPERTIES (
     "replication_num" = "1"
 )
@@ -226,15 +232,29 @@ def build_refresh_sql(target_date, check_config=None, check_table=None, expected
         for table_name in check_config.expected_tables
     ]
     return (
-        f"INSERT OVERWRITE {check_config.check_table}\n"
+        f"INSERT INTO {check_config.check_table} "
+        "(dt, country_code, platform_type, table_name, country_name, cnt, check_time)\n"
         "SELECT\n"
         f"    '{dt}' AS dt,\n"
+        f"    '{check_config.country_code}' AS country_code,\n"
+        f"    '{check_config.platform_type}' AS platform_type,\n"
         "    table_name,\n"
+        f"    '{check_config.country_name}' AS country_name,\n"
         "    cnt,\n"
         "    now() AS check_time\n"
         "FROM (\n    "
         + "\n    union all\n    ".join(parts)
         + "\n) t"
+    )
+
+
+def build_delete_existing_sql(target_date, check_config):
+    dt = _quote_date(target_date)
+    return (
+        f"DELETE FROM {check_config.check_table} "
+        f"WHERE dt = '{dt}' "
+        f"AND country_code = '{check_config.country_code}' "
+        f"AND platform_type = '{check_config.platform_type}'"
     )
 
 
@@ -250,6 +270,7 @@ def refresh_check_table(target_date=None, config=None, sr_password=None, sr_back
     try:
         cursor = conn.cursor()
         cursor.execute(build_create_check_table_sql(check_config.check_table))
+        cursor.execute(build_delete_existing_sql(target_date, check_config))
         cursor.execute(build_refresh_sql(target_date, check_config=check_config))
     finally:
         conn.close()
@@ -264,13 +285,14 @@ def fetch_check_rows(target_date=None, config=None, sr_password=None, sr_backup_
             sr_backup_password=sr_backup_password,
         )
     sql = (
-        f"select dt, table_name, cnt, check_time from {check_config.check_table} "
-        "where dt = %s order by table_name"
+        f"select dt, country_code, country_name, platform_type, table_name, cnt, check_time "
+        f"from {check_config.check_table} "
+        "where dt = %s and country_code = %s and platform_type = %s order by table_name"
     )
     conn = get_connection(config=config)
     try:
         cursor = conn.cursor()
-        cursor.execute(sql, (target_date.strftime("%Y-%m-%d"),))
+        cursor.execute(sql, (target_date.strftime("%Y-%m-%d"), check_config.country_code, check_config.platform_type))
         return list(cursor.fetchall())
     finally:
         conn.close()
@@ -421,7 +443,7 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="刷新并告警印尼投放 DWD 表 T-1 数据量校验")
     parser.add_argument("--dry-run", action="store_true", help="只打印消息，不发送 TV")
     parser.add_argument("--target-date", default=None, help="指定统计日，格式 YYYY-MM-DD；默认 T-1")
-    parser.add_argument("--skip-refresh", action="store_true", help="跳过建表和 INSERT OVERWRITE，只读取校验表")
+    parser.add_argument("--skip-refresh", action="store_true", help="跳过建表和刷新校验表，只读取校验表")
     parser.add_argument("--sr-password", default=None, help="StarRocks 主账号密码")
     parser.add_argument("--sr-backup-password", default=None, help="StarRocks 备份账号密码")
     parser.add_argument("--bot-id", default=None, help="指定发送使用的 TV 机器人 ID")
