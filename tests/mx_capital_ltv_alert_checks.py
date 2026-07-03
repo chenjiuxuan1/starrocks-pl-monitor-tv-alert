@@ -142,12 +142,12 @@ class MxCapitalLtvAlertTests(unittest.TestCase):
             {
                 "stat_date": date(2026, 6, 21),
                 "capital": "new_share",
-                "ltv": 0.66,
-                "normal_loan_amt_peso": 1000000,
-                "normal_loan_amt_usd": 50000,
-                "account_balance_peso": 4420001,
-                "account_balance_usd": 221000.05,
-                "exchange_usd_rate": 20,
+                "ltv": 0.62,
+                "normal_loan_amt_peso": 823409100,
+                "normal_loan_amt_usd": 47037700,
+                "account_balance_peso": 64676200,
+                "account_balance_usd": 3694600,
+                "exchange_usd_rate": 17.51,
             }
         ]
 
@@ -158,12 +158,13 @@ class MxCapitalLtvAlertTests(unittest.TestCase):
         self.assertLess(message.index("告警时间:"), message.index("依赖任务:"))
         self.assertLess(message.index("依赖任务:"), message.index("告警项: 墨西哥新分享ltv"))
         self.assertIn("告警项: 墨西哥新分享ltv", message)
-        self.assertIn("信托账户余额: 4,420,001 比索，即 221,000.05 美元", message)
-        self.assertIn("质押正常在贷: 1,000,000 比索，即 50,000 美元", message)
-        self.assertIn("ltv值: 0.66", message)
-        self.assertIn("兑美元汇率: 20", message)
-        self.assertIn("在阈值0.75以下，在合格线", message)
-        self.assertIn("通道余额大于44,200,00，需关注", message)
+        self.assertIn("信托账户余额: 6467.62万比索，即 369.46万 美元", message)
+        self.assertIn("质押正常在贷: 82340.91万比索，即 4703.77万美元", message)
+        self.assertIn("ltv值: 0.62", message)
+        self.assertIn("兑美元汇率: 17.51", message)
+        self.assertIn("在阈值0.75以下，需关注通道余额或者资产，是否需要减持", message)
+        self.assertIn("通道余额大于100万美金", message)
+        self.assertIn("质押正常在贷大于4300万美金", message)
         self.assertIn("告警项: 墨西哥串金ltv", message)
         self.assertIn("通道余额: 未查询到", message)
         self.assertIn("ltv值: 未查询到", message)
@@ -193,8 +194,8 @@ class MxCapitalLtvAlertTests(unittest.TestCase):
                     "stat_date": "2026-06-21",
                     "capital": "chuanjin",
                     "ltv": 1.9,
-                    "normal_loan_amt_peso": 200000,
-                    "normal_loan_amt_usd": 10000,
+                    "normal_loan_amt_peso": 57300010,
+                    "normal_loan_amt_usd": 5730001,
                     "account_balance_peso": 1,
                     "account_balance_usd": 0.05,
                     "exchange_usd_rate": 20,
@@ -204,12 +205,14 @@ class MxCapitalLtvAlertTests(unittest.TestCase):
         )
 
         self.assertIn("告警项: 墨西哥串金ltv", emergency)
-        self.assertIn("通道余额: 424,001 比索，即 21,200.05 美元", emergency)
+        self.assertIn("通道余额: 42.40万比索，即 2.12万 美元", emergency)
         self.assertIn("兑美元汇率: 20", emergency)
         self.assertIn("在阈值1.43以下，需紧急介入线", emergency)
-        self.assertIn("通道余额大于424,000，需关注", emergency)
-        self.assertIn("在阈值1.43以上，但需关注通道余额或者资产，是否需要减持", reduction_watch)
-        self.assertNotIn("通道余额大于424,000", reduction_watch)
+        self.assertIn("通道余额大于2万美金", emergency)
+        self.assertIn("在阈值1.43以上，但需关注通道余额或者资产", reduction_watch)
+        self.assertIn("质押正常在贷大于573万美金", reduction_watch)
+        self.assertNotIn("是否需要减持", reduction_watch)
+        self.assertNotIn("通道余额大于2万美金", reduction_watch)
 
     def test_format_alert_message_always_outputs_two_capital_sections(self):
         module = load_module()

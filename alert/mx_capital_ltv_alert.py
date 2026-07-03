@@ -71,8 +71,10 @@ BALANCE_LABELS = {
     "new_share": "信托账户余额",
     "chuanjin": "通道余额",
 }
-NEW_SHARE_BALANCE_THRESHOLD = Decimal("4420000")
-CHUANJIN_BALANCE_THRESHOLD = Decimal("424000")
+NEW_SHARE_BALANCE_USD_THRESHOLD = Decimal("1000000")
+NEW_SHARE_NORMAL_LOAN_USD_THRESHOLD = Decimal("43000000")
+CHUANJIN_BALANCE_USD_THRESHOLD = Decimal("20000")
+CHUANJIN_NORMAL_LOAN_USD_THRESHOLD = Decimal("5730000")
 
 
 StarRocksAccount = sr_client.StarRocksAccount
@@ -181,10 +183,17 @@ def _format_date(value):
     return str(value or "未查询到")
 
 
-def _format_money(peso_value, usd_value):
+def _format_wan_number(value):
+    number = _decimal(value)
+    if number is None:
+        return "未查询到"
+    return f"{(number / Decimal('10000')).quantize(Decimal('0.01'))}"
+
+
+def _format_money_wan(peso_value, usd_value, usd_unit="万美元"):
     if _decimal(peso_value) is None and _decimal(usd_value) is None:
         return "未查询到"
-    return f"{_format_number(peso_value)} 比索，即 {_format_number(usd_value)} 美元"
+    return f"{_format_wan_number(peso_value)}万比索，即 {_format_wan_number(usd_value)}{usd_unit}"
 
 
 def _ltv_tag(capital, ltv):
@@ -202,19 +211,25 @@ def _ltv_tag(capital, ltv):
             return "在阈值1.43以下，需紧急介入线"
         if ltv_value < Decimal("1.9"):
             return "在阈值1.43以上，在合格线"
-        return "在阈值1.43以上，但需关注通道余额或者资产，是否需要减持"
+        return "在阈值1.43以上，但需关注通道余额或者资产"
     return "未配置资方阈值，请检查告警配置"
 
 
-def _balance_tag(capital, balance):
-    balance_value = _decimal(balance)
-    if balance_value is None:
-        return None
-    if capital == "new_share" and balance_value > NEW_SHARE_BALANCE_THRESHOLD:
-        return "通道余额大于44,200,00，需关注"
-    if capital == "chuanjin" and balance_value > CHUANJIN_BALANCE_THRESHOLD:
-        return "通道余额大于424,000，需关注"
-    return None
+def _amount_tags(capital, balance_usd, normal_loan_usd):
+    balance_value = _decimal(balance_usd)
+    normal_loan_value = _decimal(normal_loan_usd)
+    tags = []
+    if capital == "new_share":
+        if balance_value is not None and balance_value > NEW_SHARE_BALANCE_USD_THRESHOLD:
+            tags.append("通道余额大于100万美金")
+        if normal_loan_value is not None and normal_loan_value > NEW_SHARE_NORMAL_LOAN_USD_THRESHOLD:
+            tags.append("质押正常在贷大于4300万美金")
+    if capital == "chuanjin":
+        if balance_value is not None and balance_value > CHUANJIN_BALANCE_USD_THRESHOLD:
+            tags.append("通道余额大于2万美金")
+        if normal_loan_value is not None and normal_loan_value > CHUANJIN_NORMAL_LOAN_USD_THRESHOLD:
+            tags.append("质押正常在贷大于573万美金")
+    return tags
 
 
 def _sort_rows(rows):
@@ -237,11 +252,14 @@ def format_alert_message(rows, target_date=None, capital=None, capitals=None):
         row = rows_by_capital.get(capital)
         if row:
             ltv = row.get("ltv")
-            balance = row.get("account_balance_peso", row.get("account_balance"))
             tags = [_ltv_tag(capital, ltv)]
-            balance_tag = _balance_tag(capital, balance)
-            if balance_tag:
-                tags.append(balance_tag)
+            tags.extend(
+                _amount_tags(
+                    capital,
+                    row.get("account_balance_usd"),
+                    row.get("normal_loan_amt_usd"),
+                )
+            )
         else:
             row = {
                 "stat_date": target_date,
@@ -252,7 +270,6 @@ def format_alert_message(rows, target_date=None, capital=None, capitals=None):
                 "exchange_usd_rate": None,
                 "ltv": None,
             }
-            balance = None
             ltv = None
             tags = [f"未查询到该资方 LTV 数据，需检查 {MONITOR_TABLE} 产出"]
 
@@ -261,8 +278,8 @@ def format_alert_message(rows, target_date=None, capital=None, capitals=None):
                 "",
                 f"告警项: {CAPITAL_LABELS.get(capital, capital or '未知资方')}",
                 f"统计日: {_format_date(row.get('stat_date')) or target_date.strftime('%Y-%m-%d')}",
-                f"{BALANCE_LABELS.get(capital, '账户余额')}: {_format_money(row.get('account_balance_peso', row.get('account_balance')), row.get('account_balance_usd'))}",
-                f"质押正常在贷: {_format_money(row.get('normal_loan_amt_peso', row.get('normal_loan_amt')), row.get('normal_loan_amt_usd'))}",
+                f"{BALANCE_LABELS.get(capital, '账户余额')}: {_format_money_wan(row.get('account_balance_peso', row.get('account_balance')), row.get('account_balance_usd'), usd_unit='万 美元')}",
+                f"质押正常在贷: {_format_money_wan(row.get('normal_loan_amt_peso', row.get('normal_loan_amt')), row.get('normal_loan_amt_usd'))}",
                 f"ltv值: {_format_number(ltv)}",
                 f"兑美元汇率: {_format_number(row.get('exchange_usd_rate'))}",
                 f"附加标签: {'；'.join(tags)}",
