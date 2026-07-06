@@ -158,28 +158,6 @@ def build_check_config(profile=None, country_name=None, platform_type=None, chec
     )
 
 
-def build_create_check_table_sql(check_table=DEFAULT_CHECK_TABLE):
-    return f"""
-CREATE TABLE IF NOT EXISTS {check_table} (
-    dt DATE COMMENT 'Data date',
-    country_code VARCHAR(32) COMMENT 'Country code',
-    platform_type VARCHAR(64) COMMENT 'Platform type',
-    table_name VARCHAR(128) COMMENT 'DWD table name',
-    country_name VARCHAR(64) COMMENT 'Country name',
-    cnt BIGINT COMMENT 'T-1 partition row count',
-    check_time DATETIME COMMENT 'Check time'
-)
-DUPLICATE KEY(dt, country_code, platform_type, table_name)
-DISTRIBUTED BY HASH(country_code, table_name) BUCKETS 8
-PROPERTIES (
-    "replication_num" = "1"
-)
-"""
-
-
-CREATE_CHECK_TABLE_SQL = build_create_check_table_sql(DEFAULT_CHECK_TABLE)
-
-
 StarRocksAccount = sr_client.StarRocksAccount
 StarRocksConfig = sr_client.StarRocksConfig
 
@@ -212,68 +190,6 @@ def parse_date(value):
     if value is None or isinstance(value, date):
         return value
     return datetime.strptime(value, "%Y-%m-%d").date()
-
-
-def _quote_date(value):
-    return parse_date(value).strftime("%Y-%m-%d")
-
-
-def build_refresh_sql(target_date, check_config=None, check_table=None, expected_tables=None):
-    check_config = check_config or MarketingDwdCheckConfig(
-        check_table=check_table or DEFAULT_CHECK_TABLE,
-        expected_tables=tuple(expected_tables or EXPECTED_TABLES),
-    )
-    dt = _quote_date(target_date)
-    parts = [
-        (
-            f"select '{table_name}' as table_name, count(1) as cnt "
-            f"from dwd.{table_name} where dt = '{dt}'"
-        )
-        for table_name in check_config.expected_tables
-    ]
-    return (
-        f"INSERT INTO {check_config.check_table} "
-        "(dt, country_code, platform_type, table_name, country_name, cnt, check_time)\n"
-        "SELECT\n"
-        f"    '{dt}' AS dt,\n"
-        f"    '{check_config.country_code}' AS country_code,\n"
-        f"    '{check_config.platform_type}' AS platform_type,\n"
-        "    table_name,\n"
-        f"    '{check_config.country_name}' AS country_name,\n"
-        "    cnt,\n"
-        "    now() AS check_time\n"
-        "FROM (\n    "
-        + "\n    union all\n    ".join(parts)
-        + "\n) t"
-    )
-
-
-def build_delete_existing_sql(target_date, check_config):
-    dt = _quote_date(target_date)
-    return (
-        f"DELETE FROM {check_config.check_table} "
-        f"WHERE dt = '{dt}' "
-        f"AND country_code = '{check_config.country_code}' "
-        f"AND platform_type = '{check_config.platform_type}'"
-    )
-
-
-def refresh_check_table(target_date=None, config=None, sr_password=None, sr_backup_password=None, check_config=None):
-    target_date = parse_date(target_date) or default_target_date()
-    check_config = check_config or build_check_config()
-    if config is None:
-        config = get_starrocks_config(
-            sr_password=sr_password,
-            sr_backup_password=sr_backup_password,
-        )
-    conn = get_connection(config=config)
-    try:
-        cursor = conn.cursor()
-        cursor.execute(build_create_check_table_sql(check_config.check_table))
-        cursor.execute(build_delete_existing_sql(target_date, check_config))
-        cursor.execute(build_refresh_sql(target_date, check_config=check_config))
-    finally:
-        conn.close()
 
 
 def fetch_check_rows(target_date=None, config=None, sr_password=None, sr_backup_password=None, check_config=None):
@@ -405,8 +321,6 @@ def run(
         sr_password=sr_password,
         sr_backup_password=sr_backup_password,
     )
-    if not skip_refresh:
-        refresh_check_table(target_date=target_date, config=config, check_config=check_config)
     rows = fetch_check_rows(target_date=target_date, config=config, check_config=check_config)
     problems = find_problem_tables(rows)
     if not problems:
@@ -437,8 +351,7 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="刷新并告警印尼投放 DWD 表 T-1 数据量校验")
     parser.add_argument("--dry-run", action="store_true", help="只打印消息，不发送 TV")
     parser.add_argument("--target-date", default=None, help="指定统计日，格式 YYYY-MM-DD；默认 T-1")
-    parser.add_argument("--skip-refresh", action="store_true", default=True, help="跳过建表和刷新校验表，只读取校验表；默认开启")
-    parser.add_argument("--refresh", dest="skip_refresh", action="store_false", help="执行建表并刷新校验表后再读取")
+    parser.add_argument("--skip-refresh", action="store_true", default=True, help="只读取校验表；默认开启")
     parser.add_argument("--sr-password", default=None, help="StarRocks 主账号密码")
     parser.add_argument("--sr-backup-password", default=None, help="StarRocks 备份账号密码")
     parser.add_argument("--bot-id", default=None, help="指定发送使用的 TV 机器人 ID")

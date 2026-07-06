@@ -36,7 +36,7 @@ def parse_args(argv=None):
     parser.add_argument("--bot-id", default=None, help="指定发送使用的 TV 机器人 ID")
     parser.add_argument("--mentions", default="", help="逗号分隔的提醒邮箱列表")
     parser.add_argument("--capital", default=None, help="墨西哥资方 LTV 参数：all/new_share/chuanjin")
-    parser.add_argument("--skip-refresh", action="store_true", help="投放 DWD 校验跳过刷新")
+    parser.add_argument("--skip-refresh", action="store_true", default=True, help="投放 DWD 校验只读取校验表；默认开启")
     parser.add_argument("--profile", default=None, help="投放 DWD 国家配置档，例如 id/ine/ph/th/mx/pk")
     parser.add_argument("--country-name", default=None, help="投放 DWD 校验国家名称，例如 印尼、菲律宾、泰国")
     parser.add_argument("--platform-type", default=None, help="投放 DWD 平台类型，例如 投放")
@@ -65,7 +65,7 @@ def main(argv=None):
     if args.alert == "mx_capital_ltv" and args.capital:
         run_kwargs["capital"] = args.capital
     if args.alert in ("id_marketing_dwd_cnt", "marketing_dwd_cnt"):
-        run_kwargs["skip_refresh"] = args.skip_refresh
+        run_kwargs["skip_refresh"] = True
         run_kwargs["profile"] = args.profile
         run_kwargs["country_name"] = args.country_name
         run_kwargs["platform_type"] = args.platform_type

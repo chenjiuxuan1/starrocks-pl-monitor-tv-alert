@@ -48,6 +48,7 @@ class RunAlertTests(unittest.TestCase):
         self.assertEqual(kwargs["bot_id"], "bot-1")
         self.assertEqual(kwargs["mentions"], ["owner@kn.group", "backup@kn.group"])
         self.assertEqual(str(kwargs["target_date"]), "2026-07-01")
+        self.assertTrue(kwargs["skip_refresh"])
 
     def test_main_passes_capital_only_to_mx_ltv_alert(self):
         module = load_module()

@@ -72,39 +72,6 @@ class FakeConnection:
 
 
 class IdMarketingDwdTableCntAlertTests(unittest.TestCase):
-    def test_build_refresh_sql_contains_every_expected_dwd_table(self):
-        module = load_module()
-
-        sql = module.build_refresh_sql(date(2026, 7, 1))
-
-        self.assertIn("INSERT INTO testdb.test_dwd_ad_table_cnt_check", sql)
-        self.assertIn("(dt, country_code, platform_type, table_name, country_name, cnt, check_time)", sql)
-        self.assertIn("'2026-07-01' AS dt", sql)
-        self.assertIn("'id' AS country_code", sql)
-        self.assertIn("'投放' AS platform_type", sql)
-        self.assertIn("'印尼' AS country_name", sql)
-        for table_name in module.EXPECTED_TABLES:
-            self.assertIn(f"from dwd.{table_name}", sql)
-            self.assertIn(f"select '{table_name}' as table_name", sql)
-        self.assertNotIn("dwd_ad_gg_campaign_unique_users", sql)
-        self.assertEqual(sql.count("union all"), len(module.EXPECTED_TABLES) - 1)
-
-    def test_build_refresh_sql_uses_custom_country_check_config(self):
-        module = load_module()
-        check_config = module.MarketingDwdCheckConfig(
-            country_name="菲律宾",
-            check_table="testdb.ph_dwd_ad_table_cnt_check",
-            expected_tables=("dwd_ad_tt_report", "dwd_ad_tt_campaign_get"),
-        )
-
-        sql = module.build_refresh_sql(date(2026, 7, 1), check_config=check_config)
-
-        self.assertIn("INSERT INTO testdb.ph_dwd_ad_table_cnt_check", sql)
-        self.assertIn("from dwd.dwd_ad_tt_report where dt = '2026-07-01'", sql)
-        self.assertIn("from dwd.dwd_ad_tt_campaign_get where dt = '2026-07-01'", sql)
-        self.assertNotIn("dwd_ad_gg_conversion_action", sql)
-        self.assertEqual(sql.count("union all"), 1)
-
     def test_build_check_config_rejects_unsafe_table_identifier(self):
         module = load_module()
 
@@ -150,28 +117,6 @@ class IdMarketingDwdTableCntAlertTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             module.build_check_config(profile="unknown-country")
-
-    def test_refresh_check_table_creates_table_and_inserts_counts(self):
-        module = load_module()
-        fake_conn = FakeConnection()
-        config = module.StarRocksConfig(
-            host="sr-id.example.com",
-            port=9030,
-            db="testdb",
-            primary=module.StarRocksAccount(username="e_load", password="secret"),
-            backup=module.StarRocksAccount(username="backup_user", password="backup-secret"),
-        )
-
-        with mock.patch.object(module.pymysql, "connect", return_value=fake_conn):
-            module.refresh_check_table(target_date=date(2026, 7, 1), config=config)
-
-        self.assertEqual(len(fake_conn.cursor_obj.executed), 3)
-        self.assertIn("CREATE TABLE IF NOT EXISTS testdb.test_dwd_ad_table_cnt_check", fake_conn.cursor_obj.executed[0][0])
-        self.assertIn("DUPLICATE KEY(dt, country_code, platform_type, table_name)", fake_conn.cursor_obj.executed[0][0])
-        self.assertIn("DELETE FROM testdb.test_dwd_ad_table_cnt_check", fake_conn.cursor_obj.executed[1][0])
-        self.assertIn("country_code = 'id'", fake_conn.cursor_obj.executed[1][0])
-        self.assertIn("INSERT INTO testdb.test_dwd_ad_table_cnt_check", fake_conn.cursor_obj.executed[2][0])
-        self.assertTrue(fake_conn.closed)
 
     def test_fetch_check_rows_queries_target_date(self):
         module = load_module()
@@ -301,55 +246,52 @@ class IdMarketingDwdTableCntAlertTests(unittest.TestCase):
         ]
         rows[0]["cnt"] = 0
 
-        with mock.patch.object(module, "refresh_check_table") as refresh:
-            with mock.patch.object(module, "fetch_check_rows", return_value=rows) as fetch:
-                with mock.patch.object(
-                    module,
-                    "send_to_tv",
-                    return_value={"success": True, "status_code": 200, "response": "ok"},
-                ) as send:
-                    with mock.patch("builtins.print"):
-                        result = module.run(
-                            target_date=date(2026, 7, 1),
-                            mentions=["owner@kn.group"],
-                            sr_password="primary-secret",
-                            sr_backup_password="backup-secret",
-                            bot_id="bot-1",
-                            country_name="菲律宾",
-                            check_table="testdb.ph_dwd_ad_table_cnt_check",
-                        )
+        with mock.patch.object(module, "fetch_check_rows", return_value=rows) as fetch:
+            with mock.patch.object(
+                module,
+                "send_to_tv",
+                return_value={"success": True, "status_code": 200, "response": "ok"},
+            ) as send:
+                with mock.patch("builtins.print"):
+                    result = module.run(
+                        target_date=date(2026, 7, 1),
+                        mentions=["owner@kn.group"],
+                        sr_password="primary-secret",
+                        sr_backup_password="backup-secret",
+                        bot_id="bot-1",
+                        country_name="菲律宾",
+                        check_table="testdb.ph_dwd_ad_table_cnt_check",
+                    )
 
         self.assertTrue(result["success"])
-        refresh.assert_not_called()
         fetch.assert_called_once()
         self.assertIn("菲律宾投放DWD表T-1产出校验", send.call_args.args[0])
         self.assertIn("校验表: testdb.ph_dwd_ad_table_cnt_check", send.call_args.args[0])
         self.assertEqual(send.call_args.kwargs["mentions"], ["owner@kn.group"])
         self.assertEqual(send.call_args.kwargs["bot_id"], "bot-1")
 
-    def test_run_can_refresh_when_requested(self):
+    def test_run_never_refreshes_check_table(self):
         module = load_module()
         rows = [
             {"table_name": "dwd_ad_tt_report", "cnt": 0, "check_time": "2026-07-02 08:00:00"},
         ]
 
-        with mock.patch.object(module, "refresh_check_table") as refresh:
-            with mock.patch.object(module, "fetch_check_rows", return_value=rows):
-                with mock.patch.object(
-                    module,
-                    "send_to_tv",
-                    return_value={"success": True, "status_code": 200, "response": "ok"},
-                ):
-                    with mock.patch("builtins.print"):
-                        result = module.run(
-                            target_date=date(2026, 7, 1),
-                            sr_password="primary-secret",
-                            sr_backup_password="backup-secret",
-                            skip_refresh=False,
-                        )
+        with mock.patch.object(module, "fetch_check_rows", return_value=rows) as fetch:
+            with mock.patch.object(
+                module,
+                "send_to_tv",
+                return_value={"success": True, "status_code": 200, "response": "ok"},
+            ):
+                with mock.patch("builtins.print"):
+                    result = module.run(
+                        target_date=date(2026, 7, 1),
+                        sr_password="primary-secret",
+                        sr_backup_password="backup-secret",
+                        skip_refresh=False,
+                    )
 
         self.assertTrue(result["success"])
-        refresh.assert_called_once()
+        fetch.assert_called_once()
 
     def test_run_skips_tv_when_no_problem_tables(self):
         module = load_module()
@@ -358,21 +300,19 @@ class IdMarketingDwdTableCntAlertTests(unittest.TestCase):
             for table_name in module.EXPECTED_TABLES
         ]
 
-        with mock.patch.object(module, "refresh_check_table") as refresh:
-            with mock.patch.object(module, "fetch_check_rows", return_value=rows) as fetch:
-                with mock.patch.object(module, "send_to_tv") as send:
-                    with mock.patch("builtins.print") as print_mock:
-                        result = module.run(
-                            target_date=date(2026, 7, 1),
-                            mentions=["owner@kn.group"],
-                            sr_password="primary-secret",
-                            sr_backup_password="backup-secret",
-                            bot_id="bot-1",
-                        )
+        with mock.patch.object(module, "fetch_check_rows", return_value=rows) as fetch:
+            with mock.patch.object(module, "send_to_tv") as send:
+                with mock.patch("builtins.print") as print_mock:
+                    result = module.run(
+                        target_date=date(2026, 7, 1),
+                        mentions=["owner@kn.group"],
+                        sr_password="primary-secret",
+                        sr_backup_password="backup-secret",
+                        bot_id="bot-1",
+                    )
 
         self.assertTrue(result["success"])
         self.assertEqual(result["response"], "no_problems")
-        refresh.assert_not_called()
         fetch.assert_called_once()
         send.assert_not_called()
         self.assertIn("跳过TV告警发送", print_mock.call_args.args[0])
