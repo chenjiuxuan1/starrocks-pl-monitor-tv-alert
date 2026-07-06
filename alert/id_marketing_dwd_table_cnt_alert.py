@@ -307,13 +307,11 @@ def _to_int(value, default=0):
         return default
 
 
-def find_problem_tables(rows, expected_tables=EXPECTED_TABLES):
-    rows_by_table = {str(row.get("table_name")): row for row in rows}
+def find_problem_tables(rows, expected_tables=None):
     problems = []
-    for table_name in expected_tables:
-        row = rows_by_table.get(table_name)
-        if row is None:
-            problems.append({"table_name": table_name, "cnt": None, "reason": "missing_check_result"})
+    for row in rows:
+        table_name = str(row.get("table_name") or "")
+        if not table_name:
             continue
         cnt = _to_int(row.get("cnt"), default=0)
         if cnt <= 0:
@@ -336,7 +334,7 @@ def _format_count(value):
 def format_alert_message(rows, target_date=None, problems=None, check_config=None):
     target_date = parse_date(target_date) or default_target_date()
     check_config = check_config or build_check_config()
-    problems = find_problem_tables(rows, expected_tables=check_config.expected_tables) if problems is None else problems
+    problems = find_problem_tables(rows) if problems is None else problems
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     latest_check_time = ""
     for row in rows:
@@ -349,7 +347,7 @@ def format_alert_message(rows, target_date=None, problems=None, check_config=Non
         f"告警时间: {now}",
         f"统计日期: {target_date.strftime('%Y-%m-%d')}",
         f"校验表: {check_config.check_table}",
-        f"预期表数: {len(check_config.expected_tables)}，实际校验结果: {len(rows)}，异常表数: {len(problems)}",
+        f"校验结果表数: {len(rows)}，异常表数: {len(problems)}",
     ]
     if latest_check_time:
         lines.append(f"最近校验时间: {latest_check_time}")
@@ -365,11 +363,7 @@ def format_alert_message(rows, target_date=None, problems=None, check_config=Non
         table_name = problem["table_name"]
         row = rows_by_table.get(table_name, {})
         cnt = problem.get("cnt", row.get("cnt"))
-        reason = (
-            f"{target_date.strftime('%Y-%m-%d')} 校验结果缺失，数据有问题"
-            if problem.get("reason") == "missing_check_result"
-            else f"{target_date.strftime('%Y-%m-%d')} 数据量为0，数据有问题"
-        )
+        reason = f"{target_date.strftime('%Y-%m-%d')} 数据量为0，数据有问题"
         lines.append(f"{index}. {table_name} | cnt={_format_count(cnt)} | {reason}")
     return "\n".join(lines)
 
@@ -392,7 +386,7 @@ def run(
     sr_backup_password=None,
     bot_id=None,
     target_date=None,
-    skip_refresh=False,
+    skip_refresh=True,
     profile=None,
     country_name=None,
     platform_type=None,
@@ -414,7 +408,7 @@ def run(
     if not skip_refresh:
         refresh_check_table(target_date=target_date, config=config, check_config=check_config)
     rows = fetch_check_rows(target_date=target_date, config=config, check_config=check_config)
-    problems = find_problem_tables(rows, expected_tables=check_config.expected_tables)
+    problems = find_problem_tables(rows)
     if not problems:
         print(
             f"✅ {check_config.country_name}{check_config.platform_type}DWD表T-1产出校验无异常，"
@@ -443,7 +437,8 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="刷新并告警印尼投放 DWD 表 T-1 数据量校验")
     parser.add_argument("--dry-run", action="store_true", help="只打印消息，不发送 TV")
     parser.add_argument("--target-date", default=None, help="指定统计日，格式 YYYY-MM-DD；默认 T-1")
-    parser.add_argument("--skip-refresh", action="store_true", help="跳过建表和刷新校验表，只读取校验表")
+    parser.add_argument("--skip-refresh", action="store_true", default=True, help="跳过建表和刷新校验表，只读取校验表；默认开启")
+    parser.add_argument("--refresh", dest="skip_refresh", action="store_false", help="执行建表并刷新校验表后再读取")
     parser.add_argument("--sr-password", default=None, help="StarRocks 主账号密码")
     parser.add_argument("--sr-backup-password", default=None, help="StarRocks 备份账号密码")
     parser.add_argument("--bot-id", default=None, help="指定发送使用的 TV 机器人 ID")

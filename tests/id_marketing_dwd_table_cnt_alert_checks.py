@@ -218,27 +218,21 @@ class IdMarketingDwdTableCntAlertTests(unittest.TestCase):
         sql, _ = fake_conn.cursor_obj.executed[0]
         self.assertIn("from testdb.ph_dwd_ad_table_cnt_check", sql)
 
-    def test_find_problem_tables_reports_zero_and_missing_tables(self):
+    def test_find_problem_tables_reports_zero_rows_from_check_table(self):
         module = load_module()
         rows = [
             {"table_name": "dwd_ad_gg_conversion_action", "cnt": 0},
             {"table_name": "dwd_ad_gg_placement", "cnt": 12},
+            {"table_name": "dwd_ad_fb_ad_set_get", "cnt": 0},
         ]
 
-        problems = module.find_problem_tables(
-            rows,
-            expected_tables=(
-                "dwd_ad_gg_conversion_action",
-                "dwd_ad_gg_placement",
-                "dwd_ad_platform_info",
-            ),
-        )
+        problems = module.find_problem_tables(rows)
 
         self.assertEqual(
             problems,
             [
                 {"table_name": "dwd_ad_gg_conversion_action", "cnt": 0, "reason": "zero_count"},
-                {"table_name": "dwd_ad_platform_info", "cnt": None, "reason": "missing_check_result"},
+                {"table_name": "dwd_ad_fb_ad_set_get", "cnt": 0, "reason": "zero_count"},
             ],
         )
 
@@ -260,11 +254,11 @@ class IdMarketingDwdTableCntAlertTests(unittest.TestCase):
 
         self.assertIn("印尼投放DWD表T-1产出校验", message)
         self.assertIn("统计日期: 2026-07-01", message)
-        self.assertIn("预期表数: 13，实际校验结果: 13，异常表数: 2", message)
+        self.assertIn("校验结果表数: 13，异常表数: 2", message)
         self.assertIn("1. dwd_ad_gg_conversion_action | cnt=0 | 2026-07-01 数据量为0，数据有问题", message)
         self.assertIn("2. dwd_ad_platform_report_snap | cnt=0 | 2026-07-01 数据量为0，数据有问题", message)
 
-    def test_format_alert_message_uses_custom_country_name_and_expected_tables(self):
+    def test_format_alert_message_uses_rows_from_check_table_for_custom_country(self):
         module = load_module()
         check_config = module.MarketingDwdCheckConfig(
             country_name="泰国",
@@ -284,8 +278,8 @@ class IdMarketingDwdTableCntAlertTests(unittest.TestCase):
 
         self.assertIn("泰国投放DWD表T-1产出校验", message)
         self.assertIn("校验表: testdb.th_dwd_ad_table_cnt_check", message)
-        self.assertIn("预期表数: 2，实际校验结果: 1，异常表数: 2", message)
-        self.assertIn("dwd_ad_tt_campaign_get | cnt=未查询到 | 2026-07-01 校验结果缺失，数据有问题", message)
+        self.assertIn("校验结果表数: 1，异常表数: 1", message)
+        self.assertIn("dwd_ad_tt_report | cnt=0 | 2026-07-01 数据量为0，数据有问题", message)
 
     def test_format_alert_message_outputs_normal_summary_without_problems(self):
         module = load_module()
@@ -299,7 +293,7 @@ class IdMarketingDwdTableCntAlertTests(unittest.TestCase):
         self.assertIn("异常表数: 0", message)
         self.assertIn("异常明细: 无，所有投放DWD表T-1分区均有数据", message)
 
-    def test_run_refreshes_fetches_and_sends_message(self):
+    def test_run_reads_check_table_and_sends_message_by_default(self):
         module = load_module()
         rows = [
             {"table_name": table_name, "cnt": 1, "check_time": "2026-07-02 08:00:00"}
@@ -326,12 +320,36 @@ class IdMarketingDwdTableCntAlertTests(unittest.TestCase):
                         )
 
         self.assertTrue(result["success"])
-        refresh.assert_called_once()
+        refresh.assert_not_called()
         fetch.assert_called_once()
         self.assertIn("菲律宾投放DWD表T-1产出校验", send.call_args.args[0])
         self.assertIn("校验表: testdb.ph_dwd_ad_table_cnt_check", send.call_args.args[0])
         self.assertEqual(send.call_args.kwargs["mentions"], ["owner@kn.group"])
         self.assertEqual(send.call_args.kwargs["bot_id"], "bot-1")
+
+    def test_run_can_refresh_when_requested(self):
+        module = load_module()
+        rows = [
+            {"table_name": "dwd_ad_tt_report", "cnt": 0, "check_time": "2026-07-02 08:00:00"},
+        ]
+
+        with mock.patch.object(module, "refresh_check_table") as refresh:
+            with mock.patch.object(module, "fetch_check_rows", return_value=rows):
+                with mock.patch.object(
+                    module,
+                    "send_to_tv",
+                    return_value={"success": True, "status_code": 200, "response": "ok"},
+                ):
+                    with mock.patch("builtins.print"):
+                        result = module.run(
+                            target_date=date(2026, 7, 1),
+                            sr_password="primary-secret",
+                            sr_backup_password="backup-secret",
+                            skip_refresh=False,
+                        )
+
+        self.assertTrue(result["success"])
+        refresh.assert_called_once()
 
     def test_run_skips_tv_when_no_problem_tables(self):
         module = load_module()
@@ -354,7 +372,7 @@ class IdMarketingDwdTableCntAlertTests(unittest.TestCase):
 
         self.assertTrue(result["success"])
         self.assertEqual(result["response"], "no_problems")
-        refresh.assert_called_once()
+        refresh.assert_not_called()
         fetch.assert_called_once()
         send.assert_not_called()
         self.assertIn("跳过TV告警发送", print_mock.call_args.args[0])
