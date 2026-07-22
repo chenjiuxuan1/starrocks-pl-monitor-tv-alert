@@ -181,6 +181,25 @@ class IdMarketingDwdTableCntAlertTests(unittest.TestCase):
             ],
         )
 
+    def test_mx_profile_ignores_retired_dedup_check_row(self):
+        module = load_module()
+        check_config = module.build_check_config(profile="mx")
+        rows = [
+            {"table_name": "dwd_ad_tt_report", "cnt": 12},
+            {"table_name": "dwd_ad_fb_ad_insight_impression_age_gender_dedup", "cnt": 0},
+        ]
+
+        problems = module.find_problem_tables(rows, ignored_tables=check_config.ignored_tables)
+        message = module.format_alert_message(
+            rows,
+            target_date=date(2026, 7, 21),
+            check_config=check_config,
+        )
+
+        self.assertEqual(problems, [])
+        self.assertIn("校验结果表数: 1，异常表数: 0", message)
+        self.assertNotIn("dwd_ad_fb_ad_insight_impression_age_gender_dedup", message)
+
     def test_format_alert_message_lists_each_problem_table(self):
         module = load_module()
         rows = [

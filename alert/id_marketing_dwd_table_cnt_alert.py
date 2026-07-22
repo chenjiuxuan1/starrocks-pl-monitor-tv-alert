@@ -84,6 +84,9 @@ MX_EXPECTED_TABLES = (
     "dwd_ad_tt_report",
     "dwd_ad_tt_report_placement",
 )
+MX_IGNORED_TABLES = (
+    "dwd_ad_fb_ad_insight_impression_age_gender_dedup",
+)
 
 MARKETING_DWD_PROFILES = {
     "id": {"country_code": "id", "country_name": "印尼", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
@@ -93,8 +96,8 @@ MARKETING_DWD_PROFILES = {
     "philippines": {"country_code": "ph", "country_name": "菲律宾", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
     "th": {"country_code": "th", "country_name": "泰国", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
     "thailand": {"country_code": "th", "country_name": "泰国", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
-    "mx": {"country_code": "mx", "country_name": "墨西哥", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": MX_EXPECTED_TABLES},
-    "mexico": {"country_code": "mx", "country_name": "墨西哥", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": MX_EXPECTED_TABLES},
+    "mx": {"country_code": "mx", "country_name": "墨西哥", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": MX_EXPECTED_TABLES, "ignored_tables": MX_IGNORED_TABLES},
+    "mexico": {"country_code": "mx", "country_name": "墨西哥", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": MX_EXPECTED_TABLES, "ignored_tables": MX_IGNORED_TABLES},
     "pk": {"country_code": "pk", "country_name": "巴基斯坦", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
     "pakistan": {"country_code": "pk", "country_name": "巴基斯坦", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
 }
@@ -108,6 +111,7 @@ class MarketingDwdCheckConfig:
     platform_type: str = DEFAULT_PLATFORM_TYPE
     check_table: str = DEFAULT_CHECK_TABLE
     expected_tables: tuple = EXPECTED_TABLES
+    ignored_tables: tuple = ()
 
     @property
     def alert_title(self):
@@ -155,6 +159,7 @@ def build_check_config(profile=None, country_name=None, platform_type=None, chec
         platform_type=resolved_platform_type,
         check_table=resolved_check_table,
         expected_tables=resolved_tables,
+        ignored_tables=tuple(profile_config.get("ignored_tables", ())),
     )
 
 
@@ -223,11 +228,12 @@ def _to_int(value, default=0):
         return default
 
 
-def find_problem_tables(rows, expected_tables=None):
+def find_problem_tables(rows, expected_tables=None, ignored_tables=None):
+    ignored_tables = set(ignored_tables or ())
     problems = []
     for row in rows:
         table_name = str(row.get("table_name") or "")
-        if not table_name:
+        if not table_name or table_name in ignored_tables:
             continue
         cnt = _to_int(row.get("cnt"), default=0)
         if cnt <= 0:
@@ -250,7 +256,8 @@ def _format_count(value):
 def format_alert_message(rows, target_date=None, problems=None, check_config=None):
     target_date = parse_date(target_date) or default_target_date()
     check_config = check_config or build_check_config()
-    problems = find_problem_tables(rows) if problems is None else problems
+    rows = [row for row in rows if str(row.get("table_name") or "") not in check_config.ignored_tables]
+    problems = find_problem_tables(rows, ignored_tables=check_config.ignored_tables) if problems is None else problems
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     latest_check_time = ""
     for row in rows:
@@ -322,7 +329,7 @@ def run(
         sr_backup_password=sr_backup_password,
     )
     rows = fetch_check_rows(target_date=target_date, config=config, check_config=check_config)
-    problems = find_problem_tables(rows)
+    problems = find_problem_tables(rows, ignored_tables=check_config.ignored_tables)
     if not problems:
         print(
             f"✅ {check_config.country_name}{check_config.platform_type}DWD表T-1产出校验无异常，"
