@@ -200,7 +200,7 @@ class IdMarketingDwdTableCntAlertTests(unittest.TestCase):
         self.assertIn("校验结果表数: 1，异常表数: 0", message)
         self.assertNotIn("dwd_ad_fb_ad_insight_impression_age_gender_dedup", message)
 
-    def test_pk_profile_ignores_t_minus_2_table_in_t_minus_1_alert(self):
+    def test_pk_profile_reports_tt_report_zero_count(self):
         module = load_module()
         check_config = module.build_check_config(profile="pk")
         rows = [
@@ -215,9 +215,12 @@ class IdMarketingDwdTableCntAlertTests(unittest.TestCase):
             check_config=check_config,
         )
 
-        self.assertEqual(problems, [])
-        self.assertIn("校验结果表数: 1，异常表数: 0", message)
-        self.assertNotIn("dwd_ad_tt_report", message)
+        self.assertEqual(
+            problems,
+            [{"table_name": "dwd_ad_tt_report", "cnt": 0, "reason": "zero_count"}],
+        )
+        self.assertIn("校验结果表数: 2，异常表数: 1", message)
+        self.assertIn("dwd_ad_tt_report", message)
 
     def test_format_alert_message_lists_each_problem_table(self):
         module = load_module()

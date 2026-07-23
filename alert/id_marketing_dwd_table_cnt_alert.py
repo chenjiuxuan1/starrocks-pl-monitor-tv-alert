@@ -87,10 +87,6 @@ MX_EXPECTED_TABLES = (
 MX_IGNORED_TABLES = (
     "dwd_ad_fb_ad_insight_impression_age_gender_dedup",
 )
-PK_IGNORED_TABLES = (
-    "dwd_ad_tt_report",
-)
-
 MARKETING_DWD_PROFILES = {
     "id": {"country_code": "id", "country_name": "印尼", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
     "ine": {"country_code": "id", "country_name": "印尼", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
@@ -101,8 +97,8 @@ MARKETING_DWD_PROFILES = {
     "thailand": {"country_code": "th", "country_name": "泰国", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
     "mx": {"country_code": "mx", "country_name": "墨西哥", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": MX_EXPECTED_TABLES, "ignored_tables": MX_IGNORED_TABLES},
     "mexico": {"country_code": "mx", "country_name": "墨西哥", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": MX_EXPECTED_TABLES, "ignored_tables": MX_IGNORED_TABLES},
-    "pk": {"country_code": "pk", "country_name": "巴基斯坦", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES, "ignored_tables": PK_IGNORED_TABLES},
-    "pakistan": {"country_code": "pk", "country_name": "巴基斯坦", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES, "ignored_tables": PK_IGNORED_TABLES},
+    "pk": {"country_code": "pk", "country_name": "巴基斯坦", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
+    "pakistan": {"country_code": "pk", "country_name": "巴基斯坦", "platform_type": "投放", "check_table": DEFAULT_CHECK_TABLE, "table_names": EXPECTED_TABLES},
 }
 
 
