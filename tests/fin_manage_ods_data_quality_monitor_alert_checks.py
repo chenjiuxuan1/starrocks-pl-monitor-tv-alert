@@ -145,7 +145,7 @@ class FinManageOdsDataQualityMonitorAlertTests(unittest.TestCase):
     def test_biz_monitor_table_points_to_fin_global_nonoperate(self):
         module = load_module()
         self.assertIn("fin_global", module.BIZ_MONITOR_TABLE)
-        self.assertIn("非经营", module.BIZ_MONITOR_TABLE)
+        self.assertIn("pl_nonoperate_expense_monthly_global", module.BIZ_MONITOR_TABLE)
         self.assertNotEqual(module.BIZ_MONITOR_TABLE, "fin.fin_manage_ods_data_quality_monitor")
 
     def test_fetch_latest_batch_counts_counts_all_and_diff_rows(self):
@@ -199,7 +199,9 @@ class FinManageOdsDataQualityMonitorAlertTests(unittest.TestCase):
         self.assertIn("🚨 StarRocks 数仓与财务库数据一致性校验", message)
         self.assertIn("集群: 中国", message)
         self.assertIn("告警记录: 172326 条，异常告警：834条，", message)
-        self.assertIn("查询表: ods_security.ods_capital_bi_*", message)
+        self.assertIn("查询表: cw_catalog.capital.bi_collection_report vs ods_security.ods_capital_bi_collection_report", message)
+        self.assertIn("bi_report_apportion_before", message)
+        self.assertIn("bi_report_apportion_after", message)
         self.assertNotIn("select count(1)", message)
 
     def test_format_biz_alert_message_matches_summary_style(self):
@@ -210,7 +212,8 @@ class FinManageOdsDataQualityMonitorAlertTests(unittest.TestCase):
         self.assertIn("🚨 StarRocks 数仓与biz库数据一致性校验", message)
         self.assertIn("集群: 中国", message)
         self.assertIn("告警记录: 40462 条，异常告警：0条，", message)
-        self.assertIn("查询表: fin_global.ods_*_pl_nonoperate_expense_monthly", message)
+        self.assertIn("查询表: fin_global.ods_{pk,mx,ph,th,ine}_pl_nonoperate_expense_monthly", message)
+        self.assertIn("pl_nonoperate_expense_monthly_global", message)
         self.assertNotIn("select count(1)", message)
 
     def test_send_to_tv_uses_requested_bot_and_mentions_field(self):

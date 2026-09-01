@@ -166,7 +166,11 @@ BIZ_UNION_SELECT = r"""
 """
 
 # ---------- 财务库告警（对账 SQL 中 ods_security. 开头的记录，即 capital 三表） ----------
-FIN_MONITOR_TABLE = "ods_security.ods_capital_bi_*（capital 三表对账）"
+FIN_MONITOR_TABLE = (
+    "cw_catalog.capital.bi_collection_report vs ods_security.ods_capital_bi_collection_report\n"
+    "  cw_catalog.capital.bi_report_apportion_before vs ods_security.ods_capital_bi_report_apportion_before\n"
+    "  cw_catalog.capital.bi_report_apportion_after vs ods_security.ods_capital_bi_report_apportion_after"
+)
 # 总记录数：全部 capital 对账行
 LATEST_BATCH_TOTAL_COUNT_SQL = (
     f"select count(1) as alert_count from ({FIN_UNION_SELECT}) __t"
@@ -178,7 +182,10 @@ LATEST_BATCH_EXCEPTION_COUNT_SQL = (
 )
 
 # ---------- biz库告警（对账 SQL 中 fin_global. 开头的记录，即五国 ODS 非经营费用） ----------
-BIZ_MONITOR_TABLE = "fin_global.ods_*_pl_nonoperate_expense_monthly（五国非经营费用对账）"
+BIZ_MONITOR_TABLE = (
+    "fin_global.ods_{pk,mx,ph,th,ine}_pl_nonoperate_expense_monthly\n"
+    "  vs fin_global.pl_nonoperate_expense_monthly_global（expense_local / expense_usd）"
+)
 # 总记录数：全部非经营对账行
 BIZ_LATEST_BATCH_TOTAL_COUNT_SQL = (
     BIZ_CTE_CLAUSE + f"select count(1) as alert_count from ({BIZ_UNION_SELECT}) __t"
