@@ -13,7 +13,8 @@
      - cw_catalog.capital.bi_* vs ods_security.ods_capital_bi_*
      - 五国 ODS 非经营费用 vs fin_global.pl_nonoperate_expense_monthly_global（expense_local / expense_usd，历史月）
      - 五国 ODS 非经营费用 vs fin_global.manage_model_pl_operational_cost_apportion_global（self_owned_fund_income，历史月）
-   异常规则: 只统计 diff > 1 的记录（源 > 目标且差 > 1，过滤浮点科学计数法噪声，如 5e-7）
+   异常规则: 只统计 abs(diff) > 1 的记录（绝对值过滤科学计数法浮点噪声，如 5e-7）；
+   统计范围忽略 table_name 以 fin_global. 开头的记录（仅保留 cw_catalog.capital.bi_* 三表对账）
 
 真实密码请通过环境变量传入:
     SR_PASSWORD=... python3 alert/fin_manage_ods_data_quality_monitor_alert.py
@@ -69,7 +70,7 @@ LATEST_BATCH_EXCEPTION_COUNT_SQL = (
 )
 
 # ---------- biz库告警（全球 PL 对账） ----------
-# 阈值：异常只统计 diff > 1 的记录（源 > 目标且差 > 1；避免浮点科学计数法噪声，如 5e-7）
+# 阈值：异常只统计 abs(diff) > 1 的记录（绝对值避免科学计数法浮点噪声，如 5e-7）
 DIFF_THRESHOLD = 1
 
 # 与用户提供的原始查询保持一致，仅做两处等价改写：
@@ -228,14 +229,16 @@ BIZ_UNION_SELECT = r"""
 
 # biz库告警查询表沿用财务库监控表（与用户确认：查询表固定为 fin.fin_manage_ods_data_quality_monitor）
 BIZ_MONITOR_TABLE = MONITOR_TABLE
-# 总记录数：全部对账行
+# 总记录数：全部对账行（忽略 table_name 以 fin_global. 开头的记录）
 BIZ_LATEST_BATCH_TOTAL_COUNT_SQL = (
-    BIZ_CTE_CLAUSE + f"select count(1) as alert_count from ({BIZ_UNION_SELECT}) __t"
+    BIZ_CTE_CLAUSE + f"select count(1) as alert_count from ({BIZ_UNION_SELECT}) __t "
+    f"where __t.table_name not like 'fin_global.%'"
 )
-# 异常记录数：只统计 diff > 1 的记录（源 > 目标且差 > 1，过滤 5e-7 这类浮点噪声）
+# 异常记录数：只统计 abs(diff) > 1 的记录（绝对值过滤 5e-7 这类科学计数法浮点噪声），
+# 并忽略 table_name 以 fin_global. 开头的记录
 BIZ_LATEST_BATCH_EXCEPTION_COUNT_SQL = (
     BIZ_CTE_CLAUSE + f"select count(1) as alert_count from ({BIZ_UNION_SELECT}) __t "
-    f"where __t.diff > {DIFF_THRESHOLD}"
+    f"where __t.table_name not like 'fin_global.%' and abs(__t.diff) > {DIFF_THRESHOLD}"
 )
 
 DEFAULT_LIMIT = 1
@@ -319,7 +322,7 @@ def fetch_latest_batch_counts(config=None, sr_password=None, sr_backup_password=
 
 
 def fetch_biz_latest_batch_counts(config=None, sr_password=None, sr_backup_password=None):
-    """biz库告警：全球 PL 对账记录数 + diff>1 异常记录数。"""
+    """biz库告警：全球 PL 对账记录数 + abs(diff)>1 异常记录数（忽略 fin_global. 开头的表）。"""
     if config is None:
         config = get_starrocks_config(
             sr_password=sr_password,
