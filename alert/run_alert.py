@@ -43,6 +43,7 @@ def parse_args(argv=None):
     parser.add_argument("--check-table", default=None, help="投放 DWD 校验结果表")
     parser.add_argument("--table-names", default=None, help="逗号分隔的投放 DWD 表名列表")
     parser.add_argument("--limit", type=int, default=None, help="兼容旧告警脚本参数")
+    parser.add_argument("--section", default=None, choices=["fin", "biz", "all"], help="PL 财务/biz 对账分段：fin（仅财务库）/ biz（仅 biz 库）/ all（默认）")
     return parser.parse_args(argv)
 
 
@@ -73,6 +74,8 @@ def main(argv=None):
         run_kwargs["table_names"] = args.table_names
     if args.limit is not None and args.alert in ("pl_monitor", "fin_ods_quality"):
         run_kwargs["limit"] = args.limit
+    if args.section and args.alert == "fin_ods_quality":
+        run_kwargs["section"] = args.section
 
     result = alert_module.run(**run_kwargs)
     return 0 if result["success"] else 1
