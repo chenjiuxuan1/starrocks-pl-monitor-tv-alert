@@ -5,16 +5,14 @@
 
 一次运行同时发送两条告警（同一脚本内，与既有告警放在一起）：
 1. 数仓与财务库数据一致性校验
-   查询:
-     select count(1) from fin.fin_manage_ods_data_quality_monitor where dt = (select max(dt) from fin.fin_manage_ods_data_quality_monitor)
-     select count(1) from fin.fin_manage_ods_data_quality_monitor where dt = (select max(dt) from fin.fin_manage_ods_data_quality_monitor) and diff <> 0
-2. 数仓与biz库数据一致性校验（全球 PL 对账，查询表沿用 fin.fin_manage_ods_data_quality_monitor）
-   校验内容:
-     - cw_catalog.capital.bi_* vs ods_security.ods_capital_bi_*
+   统计对账 SQL 中 table_name 以 ods_security. 开头的记录（cw_catalog.capital.bi_* 三表对账）
+     - cw_catalog.capital.bi_collection_report vs ods_security.ods_capital_bi_collection_report
+     - cw_catalog.capital.bi_report_apportion_before vs ods_security.ods_capital_bi_report_apportion_before
+     - cw_catalog.capital.bi_report_apportion_after vs ods_security.ods_capital_bi_report_apportion_after
+2. 数仓与biz库数据一致性校验
+   统计对账 SQL 中 table_name 以 fin_global. 开头的记录（五国 ODS 非经营费用对账）
      - 五国 ODS 非经营费用 vs fin_global.pl_nonoperate_expense_monthly_global（expense_local / expense_usd，历史月）
-     - 五国 ODS 非经营费用 vs fin_global.manage_model_pl_operational_cost_apportion_global（self_owned_fund_income，历史月）
-   异常规则: 只统计 abs(diff) > 1 的记录（绝对值过滤科学计数法浮点噪声，如 5e-7）；
-   统计范围忽略 table_name 以 fin_global. 开头的记录（仅保留 cw_catalog.capital.bi_* 三表对账）
+   异常规则: 两个告警都只统计 abs(diff) > 1 的记录（绝对值过滤科学计数法浮点噪声，如 5e-7）
 
 真实密码请通过环境变量传入:
     SR_PASSWORD=... python3 alert/fin_manage_ods_data_quality_monitor_alert.py
@@ -59,23 +57,11 @@ DEFAULT_MENTIONS = [
     if item.strip()
 ]
 
-MONITOR_TABLE = "fin.fin_manage_ods_data_quality_monitor"
-LATEST_BATCH_TOTAL_COUNT_SQL = (
-    f"select count(1) as alert_count from {MONITOR_TABLE} "
-    f"where dt = (select max(dt) from {MONITOR_TABLE})"
-)
-LATEST_BATCH_EXCEPTION_COUNT_SQL = (
-    f"select count(1) as alert_count from {MONITOR_TABLE} "
-    f"where dt = (select max(dt) from {MONITOR_TABLE}) and diff <> 0"
-)
-
-# ---------- biz库告警（全球 PL 对账） ----------
-# 阈值：异常只统计 abs(diff) > 1 的记录（绝对值避免科学计数法浮点噪声，如 5e-7）
+# ---------- 对账 SQL（与用户提供的校验语句一致，仅去掉首行 `set @v_start_date`，直接写 current_date()） ----------
+# 阈值：异常只统计 abs(diff) > 1 的记录（绝对值过滤科学计数法浮点噪声，如 5e-7）
 DIFF_THRESHOLD = 1
 
-# 与用户提供的原始查询保持一致，仅做两处等价改写：
-#   1) 去掉首行 `set @v_start_date = current_date;`，把 @v_start_date 直接写成 current_date()；
-#   2) 拆分 CTE 与 UNION 主体，分别包成总记录数 / 异常记录数两个 count 查询。
+# 五国 ODS 非经营费用 + 全球非经营费用表 CTE（biz 库对账使用）
 BIZ_CTE_CLAUSE = r"""
 with nonoperate_ods_base as (
     select stat_month, 'PK' as country,
@@ -106,29 +92,11 @@ nonoperate_global_base as (
            sum(coalesce(expense_usd, 0)) as expense_usd
     from fin_global.pl_nonoperate_expense_monthly_global
     group by stat_month, country
-),
-nonoperate_result_base as (
-    select
-        stat_month,
-        case country
-            when 'g_巴基斯坦' then 'PK'
-            when 'e_墨西哥' then 'MX'
-            when 'f_菲律宾' then 'PH'
-            when 'd_泰国' then 'TH'
-            when 'c_印尼' then 'INE'
-        end as country,
-        currency_type,
-        fin_apportion_typer,
-        sum(coalesce(stat_amounts, 0)) as stat_amounts
-    from fin_global.manage_model_pl_operational_cost_apportion_global
-    where stat_subject = 'self_owned_fund_income'
-      and country in ('g_巴基斯坦', 'e_墨西哥', 'f_菲律宾', 'd_泰国', 'c_印尼')
-      and currency_type in ('业务国本币', '美元')
-    group by stat_month, country, currency_type, fin_apportion_typer
 )
 """
 
-BIZ_UNION_SELECT = r"""
+# 财务库对账：capital 三表（table_name 以 ods_security. 开头）
+FIN_UNION_SELECT = r"""
     select
         current_date() as dt
         ,'ods_security.ods_capital_bi_collection_report' as table_name
@@ -163,8 +131,10 @@ BIZ_UNION_SELECT = r"""
     from cw_catalog.capital.bi_report_apportion_after a
     left join ods_security.ods_capital_bi_report_apportion_after b
       on b.bi_report_apportion_after_id = a.bi_report_apportion_after_id
+"""
 
-    union all
+# biz库对账：五国 ODS 非经营费用（table_name 以 fin_global. 开头）
+BIZ_UNION_SELECT = r"""
     select
         current_date() as dt
         ,concat('fin_global.ods_', lower(coalesce(a.country, b.country)), '_pl_nonoperate_expense_monthly.expense_local') as table_name
@@ -193,52 +163,30 @@ BIZ_UNION_SELECT = r"""
     full outer join nonoperate_global_base b
       on b.country = a.country
      and b.stat_month = a.stat_month
-
-    union all
-    select
-        current_date() as dt
-        ,concat('fin_global.manage_model_pl_operational_cost_apportion_global.',
-                lower(coalesce(a.country, b.country)), '.self_owned_fund_income.',
-                case when coalesce(b.currency_type, e.currency_type) = '业务国本币' then 'local' else 'usd' end, '.',
-                case when coalesce(b.fin_apportion_typer, e.fin_apportion_typer) = '分摊前' then 'before' else 'after' end) as table_name
-        ,cast(replace(coalesce(a.stat_month, b.stat_month), '-', '') as bigint) as mysql_primary_key
-        ,case
-            when coalesce(a.stat_month, b.stat_month) >= date_format(current_date(), '%Y-%m') then 0
-            when coalesce(b.currency_type, e.currency_type) = '美元' then -coalesce(a.expense_usd, 0)
-            else -coalesce(a.expense_local, 0)
-         end as src_value
-        ,coalesce(b.stat_amounts, 0) as dest_value
-        ,case
-            when coalesce(a.stat_month, b.stat_month) >= date_format(current_date(), '%Y-%m') then 0
-            when coalesce(b.currency_type, e.currency_type) = '美元' then -coalesce(a.expense_usd, 0)
-            else -coalesce(a.expense_local, 0)
-         end - coalesce(b.stat_amounts, 0) as diff
-    from nonoperate_ods_base a
-    cross join (
-        select '业务国本币' as currency_type, '分摊前' as fin_apportion_typer
-        union all select '业务国本币', '分摊后'
-        union all select '美元', '分摊前'
-        union all select '美元', '分摊后'
-    ) e
-    full outer join nonoperate_result_base b
-      on b.country = a.country
-     and b.stat_month = a.stat_month
-     and b.currency_type = e.currency_type
-     and b.fin_apportion_typer = e.fin_apportion_typer
 """
 
-# biz库告警查询表沿用财务库监控表（与用户确认：查询表固定为 fin.fin_manage_ods_data_quality_monitor）
-BIZ_MONITOR_TABLE = MONITOR_TABLE
-# 总记录数：全部对账行（忽略 table_name 以 fin_global. 开头的记录）
-BIZ_LATEST_BATCH_TOTAL_COUNT_SQL = (
-    BIZ_CTE_CLAUSE + f"select count(1) as alert_count from ({BIZ_UNION_SELECT}) __t "
-    f"where __t.table_name not like 'fin_global.%'"
+# ---------- 财务库告警（对账 SQL 中 ods_security. 开头的记录，即 capital 三表） ----------
+FIN_MONITOR_TABLE = "ods_security.ods_capital_bi_*（capital 三表对账）"
+# 总记录数：全部 capital 对账行
+LATEST_BATCH_TOTAL_COUNT_SQL = (
+    f"select count(1) as alert_count from ({FIN_UNION_SELECT}) __t"
 )
-# 异常记录数：只统计 abs(diff) > 1 的记录（绝对值过滤 5e-7 这类科学计数法浮点噪声），
-# 并忽略 table_name 以 fin_global. 开头的记录
+# 异常记录数：只统计 abs(diff) > 1 的记录（绝对值过滤 5e-7 这类科学计数法浮点噪声）
+LATEST_BATCH_EXCEPTION_COUNT_SQL = (
+    f"select count(1) as alert_count from ({FIN_UNION_SELECT}) __t "
+    f"where abs(__t.diff) > {DIFF_THRESHOLD}"
+)
+
+# ---------- biz库告警（对账 SQL 中 fin_global. 开头的记录，即五国 ODS 非经营费用） ----------
+BIZ_MONITOR_TABLE = "fin_global.ods_*_pl_nonoperate_expense_monthly（五国非经营费用对账）"
+# 总记录数：全部非经营对账行
+BIZ_LATEST_BATCH_TOTAL_COUNT_SQL = (
+    BIZ_CTE_CLAUSE + f"select count(1) as alert_count from ({BIZ_UNION_SELECT}) __t"
+)
+# 异常记录数：只统计 abs(diff) > 1 的记录（绝对值过滤 5e-7 这类科学计数法浮点噪声）
 BIZ_LATEST_BATCH_EXCEPTION_COUNT_SQL = (
     BIZ_CTE_CLAUSE + f"select count(1) as alert_count from ({BIZ_UNION_SELECT}) __t "
-    f"where __t.table_name not like 'fin_global.%' and abs(__t.diff) > {DIFF_THRESHOLD}"
+    f"where abs(__t.diff) > {DIFF_THRESHOLD}"
 )
 
 DEFAULT_LIMIT = 1
@@ -268,23 +216,6 @@ def get_connection(config=None):
     return sr_client.get_connection(config or get_starrocks_config())
 
 
-def fetch_random_rows(limit=DEFAULT_LIMIT, config=None, sr_password=None, sr_backup_password=None):
-    safe_limit = max(1, int(limit))
-    sql = f"SELECT * FROM {MONITOR_TABLE} ORDER BY RAND() LIMIT {safe_limit}"
-    if config is None:
-        config = get_starrocks_config(
-            sr_password=sr_password,
-            sr_backup_password=sr_backup_password,
-        )
-    conn = get_connection(config=config)
-    try:
-        cursor = conn.cursor()
-        cursor.execute(sql)
-        return list(cursor.fetchall())
-    finally:
-        conn.close()
-
-
 def _count_from_row(row):
     row = row or {}
     if isinstance(row, dict):
@@ -309,6 +240,7 @@ def _fetch_counts_from_sql(total_sql, exception_sql, config=None):
 
 
 def fetch_latest_batch_counts(config=None, sr_password=None, sr_backup_password=None):
+    """财务库告警：capital 三表对账记录数 + abs(diff)>1 异常记录数。"""
     if config is None:
         config = get_starrocks_config(
             sr_password=sr_password,
@@ -322,7 +254,7 @@ def fetch_latest_batch_counts(config=None, sr_password=None, sr_backup_password=
 
 
 def fetch_biz_latest_batch_counts(config=None, sr_password=None, sr_backup_password=None):
-    """biz库告警：全球 PL 对账记录数 + abs(diff)>1 异常记录数（忽略 fin_global. 开头的表）。"""
+    """biz库告警：五国 ODS 非经营费用对账记录数 + abs(diff)>1 异常记录数。"""
     if config is None:
         config = get_starrocks_config(
             sr_password=sr_password,
@@ -335,7 +267,7 @@ def fetch_biz_latest_batch_counts(config=None, sr_password=None, sr_backup_passw
     )
 
 
-def format_alert_message(alert_count, exception_count, title, monitor_table=MONITOR_TABLE, mention_labels=None):
+def format_alert_message(alert_count, exception_count, title, monitor_table=FIN_MONITOR_TABLE, mention_labels=None):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     lines = [
         f"🚨 StarRocks {title}",
@@ -352,7 +284,7 @@ def format_fin_alert_message(alert_count, exception_count, mention_labels=None):
         alert_count,
         exception_count,
         title="数仓与财务库数据一致性校验",
-        monitor_table=MONITOR_TABLE,
+        monitor_table=FIN_MONITOR_TABLE,
     )
 
 

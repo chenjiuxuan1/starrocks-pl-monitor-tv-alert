@@ -85,45 +85,68 @@ class FinManageOdsDataQualityMonitorAlertTests(unittest.TestCase):
 
         self.assertEqual(module.DEFAULT_MENTIONS, ["adamyu@kn.group", "gretchenhe@kn.group"])
 
-    def test_fin_sql_counts_latest_batch_total_and_diff_not_zero(self):
+    def test_fin_sql_counts_capital_three_tables_and_abs_diff(self):
         module = load_module()
         total_sql = module.LATEST_BATCH_TOTAL_COUNT_SQL.lower()
         exc_sql = module.LATEST_BATCH_EXCEPTION_COUNT_SQL.lower()
         self.assertIn("select count(1) as alert_count", total_sql)
-        self.assertIn("dt = (select max(dt)", total_sql)
-        self.assertIn("and diff <> 0", exc_sql)
+        self.assertIn("bi_collection_report", total_sql)
+        self.assertIn("bi_report_apportion_before", total_sql)
+        self.assertIn("bi_report_apportion_after", total_sql)
+        # 财务库告警只统计 ods_security. 开头的 capital 三表
+        self.assertIn("ods_capital_bi_collection_report", total_sql)
+        self.assertIn("ods_capital_bi_report_apportion_before", total_sql)
+        self.assertIn("ods_capital_bi_report_apportion_after", total_sql)
+        # 不再查监控表 dt = max(dt)，不再用 diff <> 0
+        self.assertNotIn("dt = (select max(dt)", total_sql)
+        self.assertNotIn("diff <> 0", exc_sql)
+        # 异常：abs(diff) > 1
+        self.assertIn("where abs(__t.diff) > 1", exc_sql)
+        # 必须为当前日期，不再使用 @v_start_date 会话变量
+        self.assertNotIn("@v_start_date", total_sql)
+        self.assertIn("current_date()", total_sql)
 
-    def test_biz_total_sql_counts_all_rows_without_diff_filter(self):
+    def test_biz_total_sql_counts_nonoperate_rows_without_diff_filter(self):
         module = load_module()
         sql = module.BIZ_LATEST_BATCH_TOTAL_COUNT_SQL.lower()
         self.assertIn("select count(1) as alert_count", sql)
         self.assertIn("from (", sql)
-        self.assertIn("bi_collection_report", sql)
-        self.assertNotIn("abs(", sql)
-
-    def test_biz_exception_sql_filters_abs_diff_greater_than_one(self):
-        module = load_module()
-        sql = module.BIZ_LATEST_BATCH_EXCEPTION_COUNT_SQL.lower()
-        self.assertIn("select count(1) as alert_count", sql)
-        self.assertIn("where abs(__t.diff) > 1", sql)
-        self.assertIn("bi_report_apportion_before", sql)
-        self.assertIn("bi_report_apportion_after", sql)
+        # biz库只统计 fin_global. 开头的五国非经营费用
         self.assertIn("ods_pk_pl_nonoperate_expense_monthly", sql)
         self.assertIn("ods_mx_pl_nonoperate_expense_monthly", sql)
         self.assertIn("ods_ph_pl_nonoperate_expense_monthly", sql)
         self.assertIn("ods_th_pl_nonoperate_expense_monthly", sql)
         self.assertIn("ods_ine_pl_nonoperate_expense_monthly", sql)
         self.assertIn("pl_nonoperate_expense_monthly_global", sql)
-        self.assertIn("manage_model_pl_operational_cost_apportion_global", sql)
-        self.assertIn("self_owned_fund_income", sql)
+        self.assertNotIn("abs(", sql)
+        self.assertNotIn("manage_model_pl_operational_cost_apportion_global", sql)
+
+    def test_biz_exception_sql_filters_abs_diff_greater_than_one(self):
+        module = load_module()
+        sql = module.BIZ_LATEST_BATCH_EXCEPTION_COUNT_SQL.lower()
+        self.assertIn("select count(1) as alert_count", sql)
+        self.assertIn("where abs(__t.diff) > 1", sql)
+        self.assertIn("ods_pk_pl_nonoperate_expense_monthly", sql)
+        self.assertIn("ods_mx_pl_nonoperate_expense_monthly", sql)
+        self.assertIn("ods_ph_pl_nonoperate_expense_monthly", sql)
+        self.assertIn("ods_th_pl_nonoperate_expense_monthly", sql)
+        self.assertIn("ods_ine_pl_nonoperate_expense_monthly", sql)
+        self.assertIn("pl_nonoperate_expense_monthly_global", sql)
+        # biz库不再包含 capital 三表与分摊 global 对账
+        self.assertNotIn("ods_capital_bi_collection_report", sql)
+        self.assertNotIn("bi_report_apportion_before", sql)
+        self.assertNotIn("bi_report_apportion_after", sql)
+        self.assertNotIn("manage_model_pl_operational_cost_apportion_global", sql)
+        self.assertNotIn("self_owned_fund_income", sql)
         # 必须为当前日期，不再使用 @v_start_date 会话变量
         self.assertNotIn("@v_start_date", sql)
         self.assertIn("current_date()", sql)
 
-    def test_biz_monitor_table_fixed_to_fin_manage_ods_data_quality_monitor(self):
+    def test_biz_monitor_table_points_to_fin_global_nonoperate(self):
         module = load_module()
-        self.assertEqual(module.BIZ_MONITOR_TABLE, "fin.fin_manage_ods_data_quality_monitor")
-        self.assertEqual(module.BIZ_MONITOR_TABLE, module.MONITOR_TABLE)
+        self.assertIn("fin_global", module.BIZ_MONITOR_TABLE)
+        self.assertIn("非经营", module.BIZ_MONITOR_TABLE)
+        self.assertNotEqual(module.BIZ_MONITOR_TABLE, "fin.fin_manage_ods_data_quality_monitor")
 
     def test_fetch_latest_batch_counts_counts_all_and_diff_rows(self):
         module = load_module()
@@ -176,7 +199,7 @@ class FinManageOdsDataQualityMonitorAlertTests(unittest.TestCase):
         self.assertIn("🚨 StarRocks 数仓与财务库数据一致性校验", message)
         self.assertIn("集群: 中国", message)
         self.assertIn("告警记录: 172326 条，异常告警：834条，", message)
-        self.assertIn("查询表: fin.fin_manage_ods_data_quality_monitor", message)
+        self.assertIn("查询表: ods_security.ods_capital_bi_*", message)
         self.assertNotIn("select count(1)", message)
 
     def test_format_biz_alert_message_matches_summary_style(self):
@@ -187,7 +210,7 @@ class FinManageOdsDataQualityMonitorAlertTests(unittest.TestCase):
         self.assertIn("🚨 StarRocks 数仓与biz库数据一致性校验", message)
         self.assertIn("集群: 中国", message)
         self.assertIn("告警记录: 40462 条，异常告警：0条，", message)
-        self.assertIn("查询表: fin.fin_manage_ods_data_quality_monitor", message)
+        self.assertIn("查询表: fin_global.ods_*_pl_nonoperate_expense_monthly", message)
         self.assertNotIn("select count(1)", message)
 
     def test_send_to_tv_uses_requested_bot_and_mentions_field(self):
