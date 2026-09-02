@@ -181,3 +181,31 @@ python3 alert/id_marketing_dwd_table_cnt_alert.py \
 2. `投放DWD告警代码拉取` 下载 `chenjiuxuan1/starrocks-pl-monitor-tv-alert` 的 GitHub main 分支到目标国家跳板机 `/root/starrocks-pl-monitor-tv-alert`。
 3. `投放DWD告警触发` 执行 `python3 alert/run_alert.py --alert marketing_dwd_cnt --profile ph`，脚本先按平台配置生成国家名、平台类型、校验表和表清单，再创建/刷新校验表，把每一个 `cnt <= 0` 或缺失校验结果的 DWD 表逐条发送到 TV。
 4. 每个国家优先只替换 `--profile`、跳板机、SR 地址、密码、TV Bot、@ 人；如果表清单不同，再补 `--table-names`，如果告警类型不是“投放”，再补 `--platform-type`。
+
+## KN Chat 私信/群发 与 测试群约定
+
+告警脚本支持把结果同时私信/群发到 KN Chat（`alert/common/knchat_sender.py`）：
+
+```bash
+KNCHAT_BOT_TOKEN='<机器人token>' python3 alert/multi_country_alert.py \
+  --country cn --knchat-chat-id -10950 --sr-password '...' --sr-backup-password '...'
+```
+
+- Token 通过环境变量 `KNCHAT_BOT_TOKEN` 提供（已持久化到中国机 `/etc/environment`）。
+- `--knchat-chat-id` 可传多个（逗号分隔）。
+
+### 测试群约定（务必遵守）
+
+> **所有测试/验证消息默认发送到「PL告警测试群」，chat_id = `-10950`**
+>
+> 机器人：数仓告警机器人 `Data_Warehouse_Alarm_Robot`（token 1571271993:...，已在群内）。
+> 定义在 `alert/common/knchat_sender.py` 的 `DEFAULT_TEST_CHAT_ID`。
+
+不要用这个群发正式告警；正式告警目标群按各自告警需求另行指定。
+
+### 多国一致性校验告警
+
+- 脚本：`alert/multi_country_alert.py`（由平台 `config/alert-templates/multi_country.py.tmpl` 合成）。
+- 参数：`--country cn/id/mx/th/ph/pk`、`--knchat-chat-id`、`--bot-id`、`--mentions`、`--dry-run`。
+- 校验 SQL 通过平台「告警注册」的 SQL 块 `CHECK_SQL` 注入并部署。
+- 平台已建 6 国条目（中国/印尼/墨西哥/泰国/菲律宾/巴基斯坦），默认停用，knchat 目标 = PL告警测试群。

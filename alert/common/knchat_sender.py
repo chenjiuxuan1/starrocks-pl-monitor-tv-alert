@@ -6,6 +6,9 @@ API: https://kn.chat/docs/bot/  —  Bot API Base: https://bot.kn.chat
   sendMessage: POST https://bot.kn.chat/bot<TOKEN>/sendMessage  {"chat_id": ..., "text": ...}
 
 Token 建议通过环境变量 KNCHAT_BOT_TOKEN 提供，避免硬编码进脚本/命令。
+
+【测试群约定】所有测试消息默认发送到：
+    PL告警测试群 chat_id = -10950（数仓告警机器人 Data_Warehouse_Alarm_Robot 已在群内）
 """
 
 import json
@@ -18,6 +21,9 @@ KNCHAT_API_BASE = os.environ.get(
     "https://bot.kn.chat",
 )
 DEFAULT_KNCHAT_BOT_TOKEN = os.environ.get("KNCHAT_BOT_TOKEN", "")
+
+# PL告警测试群（所有测试/验证消息的默认发送目标）
+DEFAULT_TEST_CHAT_ID = -10950
 
 
 def _url(token, method):
