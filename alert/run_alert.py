@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Unified entrypoint for TV alert scripts."""
+"""Unified entrypoint for TV alert scripts.
+
+支持通过 --knchat-chat-id 额外把告警结果私信/群发到 KN Chat（可选）。
+"""
 
 import argparse
 import importlib
@@ -9,6 +12,8 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from alert.common import knchat_sender  # noqa: E402
 
 
 ALERT_MODULES = {
@@ -44,7 +49,23 @@ def parse_args(argv=None):
     parser.add_argument("--table-names", default=None, help="逗号分隔的投放 DWD 表名列表")
     parser.add_argument("--limit", type=int, default=None, help="兼容旧告警脚本参数")
     parser.add_argument("--section", default=None, choices=["fin", "biz", "all"], help="PL 财务/biz 对账分段：fin（仅财务库）/ biz（仅 biz 库）/ all（默认）")
+    parser.add_argument("--knchat-chat-id", default=None, help="KN Chat 目标会话 ID（群/私聊），逗号分隔可多个；提供则额外私信/群发告警结果")
+    parser.add_argument("--knchat-token", default=None, help="KN Chat 机器人 token；缺省读环境变量 KNCHAT_BOT_TOKEN")
     return parser.parse_args(argv)
+
+
+def send_knchat(chat_ids, text, token):
+    """把 text 私信/群发到各 chat_id，返回 (ok, 错误列表)。"""
+    if not chat_ids or not text:
+        return True, []
+    errors = []
+    ok = True
+    for chat_id in chat_ids:
+        result = knchat_sender.send_message(chat_id, text, token=token)
+        if not result.get("success"):
+            ok = False
+            errors.append(f"chat_id={chat_id}: {result.get('description') or result.get('error_code')}")
+    return ok, errors
 
 
 def main(argv=None):
@@ -78,8 +99,23 @@ def main(argv=None):
         run_kwargs["section"] = args.section
 
     result = alert_module.run(**run_kwargs)
-    return 0 if result["success"] else 1
+    tv_ok = bool(result.get("success"))
+
+    # KN Chat 私信/群发：非 dry-run 且配置了 chat_id 时执行
+    knchat_ok = True
+    chat_ids = [c.strip() for c in (args.knchat_chat_id or "").split(",") if c.strip()]
+    if chat_ids and not args.dry_run:
+        message = result.get("message") or result.get("response")
+        if not message:
+            message = f"{alert_module.__name__} 告警执行完成（exit ok={tv_ok}）"
+        knchat_ok, errors = send_knchat(chat_ids, message, args.knchat_token)
+        if not knchat_ok:
+            for err in errors:
+                print(f"❌ KN Chat 私信失败: {err}")
+
+    return 0 if (tv_ok and knchat_ok) else 1
 
 
 if __name__ == "__main__":
     sys.exit(main())
+
