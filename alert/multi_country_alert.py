@@ -10,8 +10,11 @@
   - TV 告警（默认，send_to_tv）
   - KN Chat 私信/群发（提供 --knchat-chat-id，token 读环境变量 KNCHAT_BOT_TOKEN）
 
+【测试群约定】所有测试消息发送到「PL告警测试群」chat_id=-10950（数仓告警机器人
+Data_Warehouse_Alarm_Robot 已在群内）。正式告警目标群按各自需求另行指定。
+
 真实密码请通过环境变量传入:
-    SR_PASSWORD=... SR_BACKUP_PASSWORD=... python3 alert/multi_country_alert.py --country cn --knchat-chat-id -10XXXXXXX
+    SR_PASSWORD=... SR_BACKUP_PASSWORD=... python3 alert/multi_country_alert.py --country cn --knchat-chat-id -10950
 """
 
 import argparse
@@ -52,8 +55,249 @@ DEFAULT_MENTIONS = [
 
 # ---------- 校验 SQL（由平台 SQL 块注入；各国条目各自填本国 CHECK_SQL） ----------
 CHECK_SQL = r"""
--- TODO: 各国校验 SQL（占位）
-select 1 as alert_count from dual where 1=0
+with asset_grant_scope as (
+    select
+        asset_item_no,
+        user_flag,
+        user_debt_status,
+        grant_time,
+        due_time,
+        delay_due_time,
+        finish_time,
+        contract_principal_amt,
+        granted_principal_amt,
+        interest_amt,
+        fee_amt
+    from dwb.dwb_asset_info
+    where grant_time >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 day)
+      and grant_time < DATE_SUB(CURRENT_DATE(), INTERVAL 2 day)
+),
+period_grant_scope as (
+    select
+        asset_item_no,
+        period_seq,
+        user_flag,
+        user_debt_status,
+        grant_time,
+        due_time,
+        delay_due_time,
+        finish_time,
+        contract_principal_period_amt,
+        granted_principal_period_amt,
+        interest_period_amt,
+        fee_period_amt
+    from dwb.dwb_asset_period_info
+    where grant_time >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 day)
+      and grant_time < DATE_SUB(CURRENT_DATE(), INTERVAL 2 day)
+),
+asset_due_scope as (
+    select
+        asset_item_no,
+        due_time,
+        repaid_principal_amt,
+        repaid_interest_amt,
+        repaid_fee_amt,
+        extra_amt,
+        repaid_extra_amt,
+        reduce_amt,
+        penalty_amt,
+        repaid_penalty_amt
+    from dwb.dwb_asset_info
+    where due_time >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 day)
+      and due_time < DATE_SUB(CURRENT_DATE(), INTERVAL 2 day)
+),
+period_due_scope as (
+    select
+        p.asset_item_no,
+        p.repaid_principal_period_amt,
+        p.repaid_interest_period_amt,
+        p.repaid_fee_period_amt,
+        p.extra_period_amt,
+        p.repaid_extra_period_amt,
+        p.reduce_period_amt,
+        p.penalty_period_amt,
+        p.repaid_penalty_period_amt
+    from dwb.dwb_asset_period_info p
+    join asset_due_scope a
+      on p.asset_item_no = a.asset_item_no
+),
+last_period as (
+    select asset_item_no, due_time, delay_due_time, finish_time
+    from (
+        select
+            asset_item_no,
+            period_seq,
+            due_time,
+            delay_due_time,
+            finish_time,
+            row_number() over (
+                partition by asset_item_no
+                order by period_seq desc
+            ) as rn
+        from period_grant_scope
+    ) t
+    where rn = 1
+),
+grant_amt_rollup as (
+    select
+        asset_item_no,
+        sum(contract_principal_period_amt) as contract_principal_amt,
+        sum(granted_principal_period_amt) as granted_principal_amt,
+        sum(interest_period_amt) as interest_amt,
+        sum(fee_period_amt) as fee_amt
+    from period_grant_scope
+    group by asset_item_no
+),
+due_amt_rollup as (
+    select
+        asset_item_no,
+        sum(repaid_principal_period_amt) as repaid_principal_amt,
+        sum(repaid_interest_period_amt) as repaid_interest_amt,
+        sum(repaid_fee_period_amt) as repaid_fee_amt,
+        sum(extra_period_amt) as extra_amt,
+        sum(repaid_extra_period_amt) as repaid_extra_amt,
+        sum(reduce_period_amt) as reduce_amt,
+        sum(penalty_period_amt) as penalty_amt,
+        sum(repaid_penalty_period_amt) as repaid_penalty_amt
+    from period_due_scope
+    group by asset_item_no
+),
+first_asset as (
+    select
+        user_id,
+        asset_item_no,
+        grant_time,
+        granted_principal_amt
+    from (
+        select
+            user_id,
+            asset_item_no,
+            grant_time,
+            granted_principal_amt,
+            row_number() over (
+                partition by user_id
+                order by grant_time, asset_item_no
+            ) as rn
+        from dwb.dwb_asset_info
+        where asset_status in ('payoff', 'repay')
+          and asset_loan_channel <> 'noloan'
+          and coalesce(asset_source_flag, '') <> 'PAK007导流PAK009'
+    ) t
+    where rn = 1
+      and grant_time >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 day)
+      and grant_time < DATE_SUB(CURRENT_DATE(), INTERVAL 2 day)
+),
+cross_check as (
+    select 'user_flag' as check_item, count(distinct a.asset_item_no) as mismatch_cnt
+    from asset_grant_scope a
+    left join period_grant_scope p on a.asset_item_no = p.asset_item_no
+    where p.asset_item_no is null or not (a.user_flag <=> p.user_flag)
+    union all
+    select 'user_debt_status', count(distinct a.asset_item_no)
+    from asset_grant_scope a
+    left join period_grant_scope p on a.asset_item_no = p.asset_item_no
+    where p.asset_item_no is null or not (a.user_debt_status <=> p.user_debt_status)
+    union all
+    select 'grant_time', count(distinct a.asset_item_no)
+    from asset_grant_scope a
+    left join period_grant_scope p on a.asset_item_no = p.asset_item_no
+    where p.asset_item_no is null or not (a.grant_time <=> p.grant_time)
+    union all
+    select 'due_time', count(*)
+    from asset_grant_scope a
+    left join last_period p on a.asset_item_no = p.asset_item_no
+    where p.asset_item_no is null or not (a.due_time <=> p.due_time)
+    union all
+    select 'delay_due_time', count(*)
+    from asset_grant_scope a
+    left join last_period p on a.asset_item_no = p.asset_item_no
+    where p.asset_item_no is null or not (a.delay_due_time <=> p.delay_due_time)
+    union all
+    select 'finish_time', count(*)
+    from asset_grant_scope a
+    left join last_period p on a.asset_item_no = p.asset_item_no
+    where p.asset_item_no is null or not (a.finish_time <=> p.finish_time)
+    union all
+    select 'contract_principal_amt', count(*)
+    from asset_grant_scope a
+    left join grant_amt_rollup p on a.asset_item_no = p.asset_item_no
+    where p.asset_item_no is null or not (a.contract_principal_amt <=> p.contract_principal_amt)
+    union all
+    select 'granted_principal_amt', count(*)
+    from asset_grant_scope a
+    left join grant_amt_rollup p on a.asset_item_no = p.asset_item_no
+    where p.asset_item_no is null or not (a.granted_principal_amt <=> p.granted_principal_amt)
+    union all
+    select 'interest_amt', count(*)
+    from asset_grant_scope a
+    left join grant_amt_rollup p on a.asset_item_no = p.asset_item_no
+    where p.asset_item_no is null or not (a.interest_amt <=> p.interest_amt)
+    union all
+    select 'fee_amt', count(*)
+    from asset_grant_scope a
+    left join grant_amt_rollup p on a.asset_item_no = p.asset_item_no
+    where p.asset_item_no is null or not (a.fee_amt <=> p.fee_amt)
+    union all
+    select 'repaid_principal_amt', count(*)
+    from asset_due_scope a
+    left join due_amt_rollup p on a.asset_item_no = p.asset_item_no
+    where p.asset_item_no is null or not (a.repaid_principal_amt <=> p.repaid_principal_amt)
+    union all
+    select 'repaid_interest_amt', count(*)
+    from asset_due_scope a
+    left join due_amt_rollup p on a.asset_item_no = p.asset_item_no
+    where p.asset_item_no is null or not (a.repaid_interest_amt <=> p.repaid_interest_amt)
+    union all
+    select 'repaid_fee_amt', count(*)
+    from asset_due_scope a
+    left join due_amt_rollup p on a.asset_item_no = p.asset_item_no
+    where p.asset_item_no is null or not (a.repaid_fee_amt <=> p.repaid_fee_amt)
+    union all
+    select 'extra_amt', count(*)
+    from asset_due_scope a
+    left join due_amt_rollup p on a.asset_item_no = p.asset_item_no
+    where p.asset_item_no is null or not (a.extra_amt <=> p.extra_amt)
+    union all
+    select 'repaid_extra_amt', count(*)
+    from asset_due_scope a
+    left join due_amt_rollup p on a.asset_item_no = p.asset_item_no
+    where p.asset_item_no is null or not (a.repaid_extra_amt <=> p.repaid_extra_amt)
+    union all
+    select 'reduce_amt', count(*)
+    from asset_due_scope a
+    left join due_amt_rollup p on a.asset_item_no = p.asset_item_no
+    where p.asset_item_no is null or not (a.reduce_amt <=> p.reduce_amt)
+    union all
+    select 'penalty_amt', count(*)
+    from asset_due_scope a
+    left join due_amt_rollup p on a.asset_item_no = p.asset_item_no
+    where p.asset_item_no is null or not (a.penalty_amt <=> p.penalty_amt)
+    union all
+    select 'repaid_penalty_amt', count(*)
+    from asset_due_scope a
+    left join due_amt_rollup p on a.asset_item_no = p.asset_item_no
+    where p.asset_item_no is null or not (a.repaid_penalty_amt <=> p.repaid_penalty_amt)
+    union all
+    select 'first_asset_item_no', count(*)
+    from first_asset a
+    left join dwb.dwb_user_info u on a.user_id = u.user_id
+    where u.user_id is null or not (u.first_asset_item_no <=> a.asset_item_no)
+    union all
+    select 'first_grant_time', count(*)
+    from first_asset a
+    left join dwb.dwb_user_info u on a.user_id = u.user_id
+    where u.user_id is null or not (u.first_grant_time <=> a.grant_time)
+    union all
+    select 'first_grant_amt', count(*)
+    from first_asset a
+    left join dwb.dwb_user_info u on a.user_id = u.user_id
+    where u.user_id is null or not (u.first_grant_amt <=> a.granted_principal_amt)
+)
+select
+    check_item,
+    mismatch_cnt
+from cross_check
+order by check_item;
 """
 
 # 国家显示名映射（--country 值 → 中文名），用于告警文案
@@ -110,18 +354,42 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
-def _build_message(country_name, rows, extra=""):
+def _build_message(country_name, mismatch_items, error=None):
+    """按校验结果构造告警文案。mismatch_items = [(check_item, mismatch_cnt), ...]（仅异常项）。"""
     lines = [
         f"🔔 多国一致性校验告警（{country_name}）",
         f"时间：{datetime.now():%Y-%m-%d %H:%M:%S}",
     ]
-    if rows is None:
+    if error:
         lines.append("校验执行失败：无法获取校验结果")
+        lines.append(f"异常信息：{error}")
+    elif mismatch_items:
+        lines.append(f"发现 {len(mismatch_items)} 项不一致：")
+        for item, cnt in mismatch_items:
+            lines.append(f"  - {item}: {cnt}")
     else:
-        lines.append(f"异常记录数：{rows}")
-    if extra:
-        lines.append(extra)
+        lines.append("全部校验项通过（mismatch_cnt 均为 0）")
     return "\n".join(lines)
+
+
+def _run_check(config):
+    """执行 CHECK_SQL，返回 (mismatch_items, error)。
+    mismatch_items = [(check_item, mismatch_cnt), ...]（仅 mismatch_cnt > 0 的项）。
+    """
+    try:
+        rows = query_all(f"select check_item, mismatch_cnt from ({CHECK_SQL}) __t", config=config)
+        mismatch_items = []
+        for row in rows:
+            item = row.get("check_item")
+            try:
+                cnt = int(row.get("mismatch_cnt") or 0)
+            except (TypeError, ValueError):
+                cnt = 0
+            if cnt > 0:
+                mismatch_items.append((str(item), cnt))
+        return mismatch_items, None
+    except Exception as exc:  # noqa: BLE001
+        return None, str(exc)
 
 
 def run(
@@ -134,22 +402,19 @@ def run(
     knchat_chat_id=None,
     knchat_token=None,
 ):
-    """执行校验并发送通知。返回 {success, message, rows, tv_result, knchat_result}。"""
+    """执行校验并发送通知。返回 {success, message, mismatch_items, error, tv_result, knchat_result}。
+
+    仅当存在异常项（mismatch_cnt > 0）时发送 TV + KN Chat；全部通过则不发送。
+    """
     mentions = mentions if mentions is not None else DEFAULT_MENTIONS
     country_name = COUNTRY_NAMES.get(country, country)
     config = get_starrocks_config(sr_password=sr_password, sr_backup_password=sr_backup_password)
 
     # 1. 执行校验 SQL
-    rows = None
-    error = None
-    try:
-        row = query_one(f"select count(1) as alert_count from ({CHECK_SQL}) __t", config=config)
-        rows = int(row["alert_count"]) if row else 0
-    except Exception as exc:  # noqa: BLE001
-        error = str(exc)
-        rows = None
+    mismatch_items, error = _run_check(config)
+    rows = len(mismatch_items) if mismatch_items is not None else None
 
-    message = _build_message(country_name, rows, extra=f"异常信息：{error}" if error else "")
+    message = _build_message(country_name, mismatch_items, error=error)
     print(message)
 
     tv_result = None
@@ -158,7 +423,12 @@ def run(
         print("（dry-run：不发送任何通知）")
         return {"success": True, "message": message, "rows": rows, "error": error, "tv_result": None, "knchat_result": None}
 
-    # 2. TV 告警
+    # 全部通过且无错误：不发通知，静默返回
+    if error is None and rows == 0:
+        print("✅ 全部校验项通过，未发送通知")
+        return {"success": True, "message": message, "rows": rows, "error": None, "tv_result": None, "knchat_result": None}
+
+    # 2. TV 告警（仅异常/出错时）
     try:
         tv_result = tv_sender.send_to_tv(
             message,
@@ -171,7 +441,7 @@ def run(
         tv_result = {"success": False, "response": str(exc)}
         print("TV 发送异常:", exc)
 
-    # 3. KN Chat 私信/群发
+    # 3. KN Chat 私信/群发（仅异常/出错时）
     if knchat_chat_id:
         try:
             chat_ids = [c.strip() for c in str(knchat_chat_id).split(",") if c.strip()]
@@ -192,6 +462,7 @@ def run(
         "success": success,
         "message": message,
         "rows": rows,
+        "mismatch_items": mismatch_items,
         "error": error,
         "tv_result": tv_result,
         "knchat_result": knchat_result,
